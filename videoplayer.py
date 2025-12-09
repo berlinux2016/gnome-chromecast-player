@@ -3465,6 +3465,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if self.ab_button_clear.get_sensitive():
                 self.on_clear_loop(None)
             return True
+        elif keyval == key_map.get(shortcuts.get("goto_time", "g"), Gdk.KEY_g):
+            if self.goto_button.get_sensitive():
+                self.on_show_goto_dialog(None)
+            return True
         return False
 
     def take_screenshot(self):
