@@ -41,6 +41,10 @@
 - **Lautstärkeregelung** mit Slider für lokale und Chromecast-Wiedergabe
 - **Video-Info-Overlay** - Zeigt Codec, Auflösung und Bitrate an
 - **Untertitel-Support** - Automatische Erkennung von SRT, ASS, VTT Dateien
+- **Audio-Track-Auswahl** - Wechsel zwischen mehreren Audio-Spuren
+- **Lesezeichen/Resume** - Automatisches Speichern und Fortsetzen der Wiedergabe
+- **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x mit Dropdown-Menü
+- **Screenshot-Funktion** - Frame-Capture mit S-Taste
 - **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
 - **Abspiellisten-Import** - M3U und PLS Format-Support
 - **Intuitive Steuerung**: Previous, Next, Play, Pause, Stop, Seek, Volume
@@ -226,12 +230,40 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 - **M**: Stummschalten / Ton an
 - **F**: Vollbildmodus umschalten
 - **F11**: Vollbildmodus umschalten
+- **S**: Screenshot vom aktuellen Frame
 
 ### Untertitel verwenden
 
 1. **Automatische Erkennung**: Lege eine Untertitel-Datei (`.srt`, `.ass`, `.vtt`) in denselben Ordner wie dein Video. Die Datei muss denselben Namen haben (z.B. `MeinFilm.mp4` und `MeinFilm.srt`).
 2. **Auswählen**: Wenn ein Video mit Untertiteln geladen wird, wird der Untertitel-Button (Sprechblase) in der Kopfleiste aktiv.
 3. Klicke auf den Button, um eine Untertitel-Spur auszuwählen oder die Untertitel zu deaktivieren.
+
+### Audio-Spur auswählen
+
+1. Bei Videos mit mehreren Audio-Spuren (z.B. mehrsprachige Filme) wird der Audio-Button (Lautsprecher) in der Kopfleiste aktiv.
+2. Klicke auf den Button, um zwischen verfügbaren Audio-Spuren zu wechseln.
+3. Die Audio-Spuren zeigen Sprache, Titel und Codec an (z.B. "Spur 1 (deu) [AC-3]").
+
+### Lesezeichen / Wiedergabe fortsetzen
+
+1. **Automatisches Speichern**: Der Player speichert automatisch deine Position beim Schließen oder Wechseln des Videos.
+2. **Fortsetzen**: Beim erneuten Öffnen eines Videos wird ein Dialog angezeigt, um die Wiedergabe fortzusetzen oder von vorne zu beginnen.
+3. **Intelligentes Speichern**: Positionen werden nur gespeichert, wenn mehr als 5 Sekunden abgespielt wurden und das Video nicht in den letzten 30 Sekunden ist.
+4. **Lesezeichen-Verwaltung**: Lesezeichen werden automatisch entfernt, wenn du ein Video bis zum Ende schaust oder von vorne beginnst.
+
+### Wiedergabegeschwindigkeit anpassen
+
+1. Klicke auf den Geschwindigkeits-Button (Vorspul-Symbol) in der Kopfleiste.
+2. Wähle eine Geschwindigkeit: **0.5x**, **0.75x**, **Normal (1.0x)**, **1.25x**, **1.5x** oder **2.0x**.
+3. Die Geschwindigkeit wird sofort angewendet (nur für lokale Wiedergabe).
+4. Perfekt zum Lernen (langsam) oder schnellen Durchsehen (schnell).
+
+### Screenshot aufnehmen
+
+1. Drücke die **S-Taste** während der Wiedergabe (nur lokale Wiedergabe).
+2. Der Screenshot wird automatisch gespeichert in: `~/Pictures/Video-Screenshots/`
+3. Dateiname-Format: `VideoName_20251209_153045.png` (mit Timestamp).
+4. Eine Bestätigung erscheint in der Statusleiste.
 
 ### Chromecast verwenden
 
@@ -571,14 +603,32 @@ Wenn du einen Bug findest:
 - [x] **Untertitel-Support** - SRT, ASS, VTT Dateien ✓
 - [x] **Tastatur-Shortcuts** - Space (Play/Pause), Pfeiltasten (Seek), etc. ✓
 - [x] **Abspiellisten-Import** - M3U/PLS Format-Support ✓
-- [ ] **Audio-Track-Auswahl** - Bei mehrsprachigen Videos
+- [x] **Audio-Track-Auswahl** - Bei mehrsprachigen Videos ✓
+- [x] **Lesezeichen/Resume-Funktion** - Automatisches Speichern und Fortsetzen ✓
+- [x] **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x ✓
+- [x] **Screenshot-Funktion** - Frame-Capture mit S-Taste ✓
+- [ ] **Video-Equalizer** - Helligkeit, Kontrast, Sättigung
+- [ ] **Picture-in-Picture** - Schwebendes Mini-Fenster
 
 ## 📊 Version History
+
+### Version 1.6.0 (Dezember 2025)
+- ✨ **Wiedergabegeschwindigkeit** - Einstellbare Geschwindigkeit von 0.5x bis 2.0x
+- ✨ **Screenshot-Funktion** - Frame-Capture mit S-Taste, speichert in ~/Pictures/Video-Screenshots/
+- 🎚️ Geschwindigkeits-Button in Header-Bar mit 6 vordefinierten Geschwindigkeiten
+- 📸 Automatische Benennung von Screenshots mit Video-Name und Timestamp
+- 🎮 Neue Tastaturverknüpfung: S für Screenshot
+
+### Version 1.5.0 (Dezember 2025)
+- ✨ **Audio-Track-Auswahl** - Wechsel zwischen mehreren Audio-Spuren bei mehrsprachigen Videos
+- ✨ **Lesezeichen/Resume-Funktion** - Automatisches Speichern und Fortsetzen der Wiedergabe
+- 🔧 Intelligentes Lesezeichen-System - Nur bei sinnvollen Positionen (nicht Anfang/Ende)
+- 💬 Resume-Dialog beim Öffnen von Videos mit gespeicherter Position
 
 ### Version 1.4.0 (Dezember 2025)
 - ✨ **Abspiellisten-Import** - M3U und PLS Format-Support
 
-- ### Version 1.3.0 (Dezember 2025)
+### Version 1.3.0 (Dezember 2025)
 - ✨ **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
 - ✨ **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
 - ✨ **Drag & Drop** - Videos direkt ins Fenster ziehen

@@ -151,6 +151,80 @@ class ConfigManager:
         self.save_settings()
 
 
+class BookmarkManager:
+    """Verwaltet Video-Lesezeichen (gespeicherte Positionen)"""
+
+    def __init__(self):
+        self.bookmarks_dir = Path.home() / ".config" / "video-chromecast-player"
+        self.bookmarks_file = self.bookmarks_dir / "bookmarks.json"
+        self.bookmarks_dir.mkdir(exist_ok=True)
+        self.bookmarks = self.load_bookmarks()
+
+    def load_bookmarks(self):
+        """Lädt gespeicherte Lesezeichen"""
+        if self.bookmarks_file.exists():
+            try:
+                with open(self.bookmarks_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Fehler beim Laden der Lesezeichen: {e}")
+        return {}
+
+    def save_bookmarks(self):
+        """Speichert Lesezeichen"""
+        try:
+            with open(self.bookmarks_file, 'w') as f:
+                json.dump(self.bookmarks, f, indent=2)
+        except Exception as e:
+            print(f"Fehler beim Speichern der Lesezeichen: {e}")
+
+    def get_bookmark(self, video_path):
+        """Gibt die gespeicherte Position für ein Video zurück (in Sekunden)"""
+        # Nutze absoluten Pfad als Schlüssel
+        abs_path = str(Path(video_path).resolve())
+        bookmark = self.bookmarks.get(abs_path)
+        if bookmark:
+            return bookmark.get('position', 0), bookmark.get('duration', 0)
+        return None, None
+
+    def set_bookmark(self, video_path, position, duration):
+        """Speichert die aktuelle Position eines Videos"""
+        # Speichere nur wenn mehr als 5 Sekunden abgespielt und nicht in den letzten 30 Sekunden
+        if position < 5 or (duration > 0 and position > duration - 30):
+            # Entferne Lesezeichen wenn am Anfang oder Ende
+            self.remove_bookmark(video_path)
+            return
+
+        abs_path = str(Path(video_path).resolve())
+        self.bookmarks[abs_path] = {
+            'position': position,
+            'duration': duration,
+            'timestamp': time.time(),
+            'filename': Path(video_path).name
+        }
+        self.save_bookmarks()
+        print(f"Lesezeichen gespeichert: {Path(video_path).name} @ {self.format_time(position)}")
+
+    def remove_bookmark(self, video_path):
+        """Entfernt ein Lesezeichen"""
+        abs_path = str(Path(video_path).resolve())
+        if abs_path in self.bookmarks:
+            del self.bookmarks[abs_path]
+            self.save_bookmarks()
+
+    def has_bookmark(self, video_path):
+        """Prüft ob ein Lesezeichen existiert"""
+        abs_path = str(Path(video_path).resolve())
+        return abs_path in self.bookmarks
+
+    @staticmethod
+    def format_time(seconds):
+        """Formatiert Sekunden zu MM:SS"""
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins:02d}:{secs:02d}"
+
+
 class VideoConverter:
     """Automatische Video-Konvertierung für Chromecast-Kompatibilität"""
 
@@ -1223,6 +1297,101 @@ class VideoPlayer(Gtk.Box):
     def stop(self):
         self.playbin.set_state(Gst.State.NULL)
 
+    def set_playback_rate(self, rate):
+        """Setzt die Wiedergabegeschwindigkeit (0.5 = halbe, 2.0 = doppelte Geschwindigkeit)"""
+        if rate <= 0:
+            print(f"Ungültige Wiedergabegeschwindigkeit: {rate}")
+            return False
+
+        position = self.get_position()
+
+        # Führe Seek mit neuer Rate aus
+        seek_event = Gst.Event.new_seek(
+            rate,
+            Gst.Format.TIME,
+            Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE,
+            Gst.SeekType.SET,
+            int(position * Gst.SECOND),
+            Gst.SeekType.NONE,
+            -1
+        )
+
+        success = self.playbin.send_event(seek_event)
+        if success:
+            print(f"Wiedergabegeschwindigkeit: {rate}x")
+        else:
+            print(f"Fehler beim Setzen der Wiedergabegeschwindigkeit auf {rate}x")
+        return success
+
+    def get_playback_rate(self):
+        """Gibt die aktuelle Wiedergabegeschwindigkeit zurück"""
+        # GStreamer speichert die Rate nicht direkt, daher müssen wir sie selbst verfolgen
+        return getattr(self, '_playback_rate', 1.0)
+
+    def take_screenshot(self, save_path):
+        """Nimmt einen Screenshot des aktuellen Frames"""
+        try:
+            # Hole das aktuelle Sample vom Sink
+            sample = self.gtksink.get_property("paintable").get_current_frame()
+            if not sample:
+                print("Kein Frame verfügbar für Screenshot")
+                return False
+
+            # Hole die Caps (Format-Info)
+            caps = sample.get_caps()
+            if not caps:
+                print("Keine Caps für Screenshot verfügbar")
+                return False
+
+            # Extrahiere das Buffer
+            buffer = sample.get_buffer()
+            if not buffer:
+                print("Kein Buffer für Screenshot")
+                return False
+
+            # Map the buffer to access the data
+            success, map_info = buffer.map(Gst.MapFlags.READ)
+            if not success:
+                print("Konnte Buffer nicht mappen")
+                return False
+
+            try:
+                # Hole Breite und Höhe aus Caps
+                structure = caps.get_structure(0)
+                width = structure.get_value('width')
+                height = structure.get_value('height')
+
+                # Erstelle PNG mit GdkPixbuf
+                from gi.repository import GdkPixbuf
+
+                # Konvertiere buffer data zu bytes
+                data = map_info.data
+
+                # Erstelle Pixbuf aus Raw-Daten
+                pixbuf = GdkPixbuf.Pixbuf.new_from_data(
+                    data,
+                    GdkPixbuf.Colorspace.RGB,
+                    False,  # has_alpha
+                    8,  # bits_per_sample
+                    width,
+                    height,
+                    width * 3  # rowstride
+                )
+
+                # Speichere als PNG
+                pixbuf.savev(save_path, "png", [], [])
+                print(f"Screenshot gespeichert: {save_path}")
+                return True
+
+            finally:
+                buffer.unmap(map_info)
+
+        except Exception as e:
+            print(f"Fehler beim Screenshot: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def on_gst_message(self, bus, message):
         t = message.type
         if t == Gst.MessageType.ERROR:
@@ -1306,6 +1475,41 @@ class VideoPlayer(Gtk.Box):
         """Setzt die aktive Untertitel-Spur. -1 zum Deaktivieren."""
         self.playbin.set_property("current-text", index)
 
+    def get_audio_tracks(self):
+        """Gibt eine Liste der verfügbaren Audio-Spuren zurück."""
+        tracks = []
+        n_audio = self.playbin.get_property("n-audio")
+        for i in range(n_audio):
+            tags = self.playbin.emit("get-audio-tags", i)
+            if tags:
+                lang = tags.get_string(Gst.TAG_LANGUAGE_CODE)
+                title = tags.get_string(Gst.TAG_TITLE)
+                codec = tags.get_string(Gst.TAG_AUDIO_CODEC)
+
+                description = f"Spur {i+1}"
+                if lang and lang[0]:
+                    description = f"Spur {i+1} ({lang[1]})"
+                if title and title[0]:
+                    description = title[1]
+                if codec and codec[0]:
+                    description += f" [{codec[1]}]"
+
+                tracks.append({"index": i, "description": description})
+            else:
+                # Fallback wenn keine Tags verfügbar sind
+                tracks.append({"index": i, "description": f"Audio-Spur {i+1}"})
+        return tracks
+
+    def set_audio_track(self, index):
+        """Setzt die aktive Audio-Spur."""
+        if index >= 0:
+            self.playbin.set_property("current-audio", index)
+            print(f"Audio-Spur gewechselt zu Index {index}")
+
+    def get_current_audio_track(self):
+        """Gibt den Index der aktuell aktiven Audio-Spur zurück."""
+        return self.playbin.get_property("current-audio")
+
     def extract_video_info(self, taglist):
         """Extrahiert Video-Informationen aus dem GStreamer-Stream."""
         # Diese Funktion wird aufgerufen, wenn eine TAG-Nachricht empfangen wird.
@@ -1371,7 +1575,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Config Manager
         self.config = ConfigManager()
-        
+
+        # Bookmark Manager
+        self.bookmark_manager = BookmarkManager()
+
         # Chromecast Manager, HTTP-Server und Video-Converter
         self.cast_manager = ChromecastManager()
         self.http_server = VideoHTTPServer()
@@ -1385,6 +1592,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Zustand für Stummschaltung
         self.is_muted = False
         self.last_volume = 1.0
+
+        # Wiedergabegeschwindigkeit
+        self.current_playback_rate = 1.0
 
         # Cleanup beim Schließen
         self.connect("close-request", self.on_close_request)
@@ -1451,8 +1661,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Setze Info-Callback
         self.video_player.info_callback = self.show_video_info
 
-        # Setze Callback für Stream-Erkennung (für Untertitel)
-        self.video_player.streams_ready_callback = self.update_subtitle_menu
+        # Setze Callback für Stream-Erkennung (für Untertitel und Audio)
+        self.video_player.streams_ready_callback = self.update_media_menus
 
         # Drag-and-Drop Setup
         self.setup_drag_and_drop()
@@ -1565,7 +1775,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                         self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - len(video_files))
                         first_video = self.playlist_manager.get_current_video()
                         if first_video:
-                            self.load_and_play_video(first_video)
+                            self.load_video_with_bookmark_check(first_video)
 
                     self.status_label.set_text(f"{len(video_files)} Video(s) zur Playlist hinzugefügt")
                     return True
@@ -1625,10 +1835,38 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.subtitle_button.set_icon_name("media-view-subtitles-symbolic")
         self.subtitle_button.set_tooltip_text("Untertitel auswählen")
         self.subtitle_button.set_sensitive(False) # Deaktiviert bis Video geladen
-        
+
         self.subtitle_popover = Gtk.PopoverMenu()
         self.subtitle_button.set_popover(self.subtitle_popover)
         header.pack_end(self.subtitle_button)
+
+        # Audio-Track-Button
+        self.audio_button = Gtk.MenuButton()
+        self.audio_button.set_icon_name("audio-speakers-symbolic")
+        self.audio_button.set_tooltip_text("Audio-Spur auswählen")
+        self.audio_button.set_sensitive(False) # Deaktiviert bis Video geladen
+
+        self.audio_popover = Gtk.PopoverMenu()
+        self.audio_button.set_popover(self.audio_popover)
+        header.pack_end(self.audio_button)
+
+        # Wiedergabegeschwindigkeit-Button
+        self.speed_button = Gtk.MenuButton()
+        self.speed_button.set_icon_name("media-seek-forward-symbolic")
+        self.speed_button.set_tooltip_text("Wiedergabegeschwindigkeit")
+        self.speed_button.set_sensitive(False) # Deaktiviert bis Video geladen
+
+        # Erstelle Speed-Menü
+        speed_menu = Gio.Menu()
+        speeds = [("0.5x", 0.5), ("0.75x", 0.75), ("Normal (1.0x)", 1.0),
+                  ("1.25x", 1.25), ("1.5x", 1.5), ("2.0x", 2.0)]
+        for label, speed in speeds:
+            speed_menu.append(label, f"win.set_speed({speed})")
+
+        self.speed_popover = Gtk.PopoverMenu()
+        self.speed_popover.set_menu_model(speed_menu)
+        self.speed_button.set_popover(self.speed_popover)
+        header.pack_end(self.speed_button)
 
         # Vollbild-Button
         self.fullscreen_button = Gtk.Button()
@@ -1848,6 +2086,25 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         else:
             return self.cast_manager.get_duration()
 
+    def seek_to_position(self, position):
+        """Springt zu einer bestimmten Position im Video"""
+        if self.play_mode == "local":
+            self.video_player.seek(position)
+        else:
+            self.cast_manager.seek(position)
+        print(f"Gesprungen zu Position: {self.format_time(position)}")
+
+    def save_current_position(self):
+        """Speichert die aktuelle Wiedergabeposition als Lesezeichen"""
+        if not self.current_video_path:
+            return
+
+        position = self.get_current_position()
+        duration = self.get_current_duration()
+
+        if position and duration and position > 0:
+            self.bookmark_manager.set_bookmark(self.current_video_path, position, duration)
+
     def on_timeline_seek(self, scale, scroll_type, value):
         """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt."""
         duration = self.get_current_duration()
@@ -2001,8 +2258,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # Info-Overlay vorbereiten
                 self.info_label.set_opacity(0.0)
 
-                # Untertitel-Menü zurücksetzen
+                # Untertitel-, Audio- und Speed-Menü zurücksetzen
                 self.subtitle_button.set_sensitive(False)
+                self.audio_button.set_sensitive(False)
+                self.speed_button.set_sensitive(True)  # Speed ist immer für lokale Wiedergabe verfügbar
 
                 # Timeline aktivieren nach kurzem Delay
                 def enable_timeline():
@@ -2573,24 +2832,68 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.playlist_manager.set_current_index(index)
             video_path = self.playlist_manager.get_current_video()
             if video_path:
-                self.load_and_play_video(video_path)
+                self.load_video_with_bookmark_check(video_path)
 
     def on_next_video(self, button):
         """Springt zum nächsten Video in der Playlist"""
         next_video = self.playlist_manager.next_video()
         if next_video:
-            self.load_and_play_video(next_video)
+            self.load_video_with_bookmark_check(next_video)
             self.update_playlist_ui()
 
     def on_previous_video(self, button):
         """Springt zum vorherigen Video in der Playlist"""
         previous_video = self.playlist_manager.previous_video()
         if previous_video:
-            self.load_and_play_video(previous_video)
+            self.load_video_with_bookmark_check(previous_video)
             self.update_playlist_ui()
 
-    def load_and_play_video(self, filepath):
+    def load_video_with_bookmark_check(self, filepath):
+        """Lädt ein Video und prüft ob ein Lesezeichen existiert"""
+        # Prüfe ob Lesezeichen existiert
+        if self.bookmark_manager.has_bookmark(filepath):
+            position, duration = self.bookmark_manager.get_bookmark(filepath)
+            if position and duration:
+                # Zeige Dialog
+                self.show_resume_dialog(filepath, position, duration)
+                return
+
+        # Kein Lesezeichen, normal starten
+        self.load_and_play_video(filepath)
+
+    def show_resume_dialog(self, filepath, position, duration):
+        """Zeigt Dialog zum Fortsetzen der Wiedergabe"""
+        filename = Path(filepath).name
+        time_str = self.bookmark_manager.format_time(position)
+
+        dialog = Adw.MessageDialog.new(self)
+        dialog.set_heading("Wiedergabe fortsetzen?")
+        dialog.set_body(f"Möchten Sie '{filename}' an der gespeicherten Position ({time_str}) fortsetzen?")
+
+        dialog.add_response("cancel", "Von Anfang an")
+        dialog.add_response("resume", "Fortsetzen")
+        dialog.set_response_appearance("resume", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("resume")
+        dialog.set_close_response("cancel")
+
+        def on_response(dialog, response):
+            if response == "resume":
+                # Lade Video und springe zur Position
+                self.load_and_play_video(filepath, resume_position=position)
+            else:
+                # Von vorne beginnen und Lesezeichen entfernen
+                self.bookmark_manager.remove_bookmark(filepath)
+                self.load_and_play_video(filepath)
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def load_and_play_video(self, filepath, resume_position=None):
         """Lädt und spielt ein Video ab"""
+        # Speichere Position des vorherigen Videos
+        if self.current_video_path and self.current_video_path != filepath:
+            self.save_current_position()
+
         self.current_video_path = filepath
         filename = Path(filepath).name
 
@@ -2618,6 +2921,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     self.duration_label.set_text(self.format_time(duration))
                     self.time_label.set_text("00:00")
                     self.timeline_scale.set_value(0)
+
+                    # Wenn resume_position gesetzt ist, springe dorthin
+                    if resume_position:
+                        GLib.timeout_add(100, lambda: self.seek_to_position(resume_position))
                 return False
 
             GLib.timeout_add(500, enable_timeline)
@@ -2692,7 +2999,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             "n": Gdk.KEY_n,
             "N": Gdk.KEY_N,
             "p": Gdk.KEY_p,
-            "P": Gdk.KEY_P
+            "P": Gdk.KEY_P,
+            "s": Gdk.KEY_s,
+            "S": Gdk.KEY_S
         }
         
         # Prüfe alle Shortcuts
@@ -2723,7 +3032,40 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         elif keyval == key_map.get(shortcuts.get("previous_video", "p"), Gdk.KEY_p):
             self.on_previous_video(None)
             return True
+        elif keyval == key_map.get(shortcuts.get("screenshot", "s"), Gdk.KEY_s):
+            self.take_screenshot()
+            return True
         return False
+
+    def take_screenshot(self):
+        """Nimmt einen Screenshot und speichert ihn"""
+        if self.play_mode != "local":
+            self.status_label.set_text("Screenshots nur bei lokaler Wiedergabe möglich")
+            return
+
+        # Erstelle Screenshots-Verzeichnis
+        screenshots_dir = Path.home() / "Pictures" / "Video-Screenshots"
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generiere Dateinamen mit Timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Versuche Video-Namen zu verwenden
+        video_name = "screenshot"
+        if self.current_video_path:
+            video_name = Path(self.current_video_path).stem
+
+        filename = f"{video_name}_{timestamp}.png"
+        filepath = screenshots_dir / filename
+
+        # Mache Screenshot
+        success = self.video_player.take_screenshot(str(filepath))
+
+        if success:
+            self.status_label.set_text(f"Screenshot gespeichert: {filename}")
+        else:
+            self.status_label.set_text("Screenshot fehlgeschlagen")
 
     def seek_relative(self, seconds):
         """Spult relativ zur aktuellen Position."""
@@ -2804,6 +3146,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         return False # Verhindert, dass der Callback erneut aufgerufen wird
 
+    def update_media_menus(self):
+        """Aktualisiert Untertitel- und Audio-Menüs."""
+        self.update_subtitle_menu()
+        self.update_audio_menu()
+        return False
+
     def update_subtitle_menu(self):
         """Aktualisiert das Untertitel-Menü basierend auf verfügbaren Spuren."""
         print("Suche nach Untertitel-Spuren...")
@@ -2815,7 +3163,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             return False
 
         print(f"{len(tracks)} Untertitel-Spur(en) gefunden.")
-        
+
         # Erstelle ein neues Menü-Modell
         menu_model = Gio.Menu()
 
@@ -2830,11 +3178,53 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.subtitle_button.set_sensitive(True)
         return False # Nur einmal ausführen
 
+    def update_audio_menu(self):
+        """Aktualisiert das Audio-Menü basierend auf verfügbaren Spuren."""
+        print("Suche nach Audio-Spuren...")
+        tracks = self.video_player.get_audio_tracks()
+
+        if not tracks or len(tracks) <= 1:
+            print(f"Nur {len(tracks)} Audio-Spur gefunden, kein Menü nötig.")
+            self.audio_button.set_sensitive(False)
+            return False
+
+        print(f"{len(tracks)} Audio-Spur(en) gefunden.")
+
+        # Erstelle ein neues Menü-Modell
+        menu_model = Gio.Menu()
+
+        # Einträge für jede Spur
+        for track in tracks:
+            menu_model.append(track["description"], f"win.set_audio({track['index']})")
+
+        self.audio_popover.set_menu_model(menu_model)
+        self.audio_button.set_sensitive(True)
+        return False # Nur einmal ausführen
+
     def on_set_subtitle(self, action, param):
         """Wird aufgerufen, wenn ein Untertitel aus dem Menü ausgewählt wird."""
         index = param.get_int32()
         self.video_player.set_subtitle_track(index)
         print(f"Untertitel-Spur auf {index} gesetzt.")
+
+    def on_set_audio(self, action, param):
+        """Wird aufgerufen, wenn eine Audio-Spur aus dem Menü ausgewählt wird."""
+        index = param.get_int32()
+        self.video_player.set_audio_track(index)
+        print(f"Audio-Spur auf {index} gesetzt.")
+
+    def on_set_speed(self, action, param):
+        """Wird aufgerufen, wenn die Wiedergabegeschwindigkeit geändert wird."""
+        speed = param.get_double()
+        self.current_playback_rate = speed
+
+        # Nur für lokale Wiedergabe (Chromecast unterstützt keine variable Geschwindigkeit)
+        if self.play_mode == "local":
+            self.video_player.set_playback_rate(speed)
+            self.video_player._playback_rate = speed
+            self.status_label.set_text(f"Geschwindigkeit: {speed}x")
+        else:
+            self.status_label.set_text("Geschwindigkeitsänderung nur für lokale Wiedergabe")
 
     def on_show_about(self, button):
         """Zeigt About-Dialog"""
@@ -2843,43 +3233,65 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="1.4.0",
+            version="1.6.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
             website="https://github.com/berlinux2016/gnome-chromecast-player",
             issue_url="https://github.com/berlinux2016/gnome-chromecast-player/issues",
-            comments="Ein moderner GTK4-Videoplayer mit Chromecast-Unterstützung, der für eine nahtlose Wiedergabe sowohl lokal als auch auf Chromecast-Geräten optimiert ist. Inklusive Hardware-Beschleunigung für AMD und NVIDIA GPUs.\n\nMit Liebe für Simone programmiert ❤️",
-            release_notes="""<p>Version 1.4.0 (2025-12-25)</p>
-<ul>
-  <li>Abspiellisten-Import - M3U und PLS Format-Support</li>
-  <li>Tastatur-Shortcuts - Steuerung per Leertaste, Pfeiltasten, etc.</li>
-</ul>
-<p>Version 1.3.0 (2025-12-20)</p>
-<ul>
-  <li>Vollbild-Modus - F11 für Vollbild-Wiedergabe</li>
-  <li>Drag &amp; Drop - Videos direkt ins Fenster ziehen</li>
-  <li>Video-Info-Overlay - Zeigt Codec, Auflösung und Bitrate an</li>
-  <li>Untertitel-Support - Automatische Erkennung von SRT, ASS, VTT Dateien</li>
-</ul>
-<p>Version 1.2.0 (2025-12-15)</p>
-<ul>
-  <li>Hardware-Beschleunigung - AMD VA-API und NVIDIA NVDEC Unterstützung</li>
-  <li>Automatische Konvertierung - MKV/AVI zu MP4 für Chromecast</li>
-  <li>Playlist-Management - Mit Shuffle und Duplikat-Entfernung</li>
-</ul>
-<p>Version 1.1.0 (2025-12-10)</p>
-<ul>
-  <li>Chromecast-Unterstützung - Streaming zu Google Chromecast Geräten</li>
-  <li>Lokale Wiedergabe - GTK4/GStreamer basierter Player</li>
-  <li>Duale Modi - Lokal und Chromecast mit nahtlosem Wechsel</li>
-</ul>
-<p>Version 1.0.0 (2025-12-01)</p>
-<ul>
-  <li>Erstveröffentlichung</li>
-  <li>GTK4 Oberfläche mit Adwaita Design</li>
-  <li>Grundlegende Video-Wiedergabefunktionen</li>
-</ul>"""
+            comments="Ein moderner GTK4-Videoplayer mit Chromecast-Unterstützung, der für eine nahtlose Wiedergabe sowohl lokal als auch auf Chromecast-Geräten optimiert ist. Inklusive Hardware-Beschleunigung für AMD und NVIDIA GPUs.\n\nMit Liebe für Simone programmiert ❤️"
+        )
+
+        # Füge Version-Informationen als Credit-Sections hinzu
+        about.add_credit_section(
+            "Was ist neu in Version 1.6.0?",
+            [
+                "Wiedergabegeschwindigkeit - 0.5x bis 2.0x einstellbar",
+                "Screenshot-Funktion - S-Taste für Frame-Capture",
+                "Geschwindigkeits-Button in Header-Bar",
+                "Auto-Speicherung von Screenshots in ~/Pictures/Video-Screenshots/"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.5.0",
+            [
+                "Audio-Track-Auswahl - Wechsel zwischen mehreren Audio-Spuren",
+                "Lesezeichen/Resume - Automatisches Speichern und Fortsetzen",
+                "Intelligentes Lesezeichen-System",
+                "Resume-Dialog beim Öffnen gespeicherter Videos"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.4.0",
+            [
+                "Abspiellisten-Import - M3U und PLS Format",
+                "Tastatur-Shortcuts - Leertaste, Pfeiltasten, etc."
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.3.0",
+            [
+                "Vollbild-Modus - F11 für Vollbild",
+                "Drag & Drop - Videos ins Fenster ziehen",
+                "Video-Info-Overlay - Codec, Auflösung, Bitrate",
+                "Untertitel-Support - SRT, ASS, VTT"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.0-1.2",
+            [
+                "GTK4/Libadwaita UI im GNOME-Stil",
+                "Hardware-Beschleunigung (AMD VA-API, NVIDIA NVDEC)",
+                "Chromecast-Streaming mit HTTP-Server",
+                "Automatische MKV/AVI zu MP4 Konvertierung",
+                "Playlist-Unterstützung mit Auto-Advance",
+                "Timeline/Seek-Funktion",
+                "Lautstärkeregelung"
+            ]
         )
 
         about.present()      
@@ -2887,6 +3299,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_close_request(self, window):
         """Cleanup beim Schließen der Anwendung"""
         print("Beende Anwendung, räume auf...")
+
+        # Speichere aktuelle Video-Position als Lesezeichen
+        self.save_current_position()
 
         # Speichere Fenstergröße
         width, height = self.get_default_size()
@@ -2936,10 +3351,18 @@ class VideoPlayerApp(Adw.Application):
         super().__init__(application_id='com.videocast.player')
         self.connect('activate', self.on_activate)
 
-        # Aktionen für das Menü (z.B. Untertitel)
-        action = Gio.SimpleAction.new_stateful("set_subtitle", GLib.VariantType.new('i'), GLib.Variant('i', -1))
-        action.connect("activate", self.on_app_set_subtitle)
-        self.add_action(action)
+        # Aktionen für das Menü (z.B. Untertitel, Audio und Geschwindigkeit)
+        subtitle_action = Gio.SimpleAction.new_stateful("set_subtitle", GLib.VariantType.new('i'), GLib.Variant('i', -1))
+        subtitle_action.connect("activate", self.on_app_set_subtitle)
+        self.add_action(subtitle_action)
+
+        audio_action = Gio.SimpleAction.new_stateful("set_audio", GLib.VariantType.new('i'), GLib.Variant('i', 0))
+        audio_action.connect("activate", self.on_app_set_audio)
+        self.add_action(audio_action)
+
+        speed_action = Gio.SimpleAction.new_stateful("set_speed", GLib.VariantType.new('d'), GLib.Variant('d', 1.0))
+        speed_action.connect("activate", self.on_app_set_speed)
+        self.add_action(speed_action)
 
     def on_activate(self, app):
         self.win = VideoPlayerWindow(application=app)
@@ -2949,6 +3372,16 @@ class VideoPlayerApp(Adw.Application):
         """Leitet die Untertitel-Aktion an das Fenster weiter."""
         if self.win:
             self.win.on_set_subtitle(action, param)
+
+    def on_app_set_audio(self, action, param):
+        """Leitet die Audio-Aktion an das Fenster weiter."""
+        if self.win:
+            self.win.on_set_audio(action, param)
+
+    def on_app_set_speed(self, action, param):
+        """Leitet die Geschwindigkeits-Aktion an das Fenster weiter."""
+        if self.win:
+            self.win.on_set_speed(action, param)
 
 
 def main():
