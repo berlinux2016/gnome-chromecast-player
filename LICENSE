@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 BerLinuX
+Copyright (c) 2025 DaHool
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+===============================================================================
+THIRD-PARTY DEPENDENCIES AND CODECS
+===============================================================================
+
+This software uses hardware-accelerated video encoding/decoding through:
+- AMD VAAPI (Video Acceleration API) - Open source, no patent issues
+- NVIDIA NVENC/NVDEC - Proprietary but freely available
+
+H.264 CODEC NOTICE:
+This software does NOT include any H.264 software codec implementations.
+It exclusively uses hardware encoders/decoders provided by your GPU.
+Users are responsible for ensuring they have proper hardware and drivers
+installed to use video encoding features.
+
+The following packages may be required (user must install):
+- For AMD: mesa-va-drivers, ffmpeg
+- For NVIDIA: nvidia-driver, ffmpeg
+
+This software does not distribute or link against libx264 or any other
+software H.264 codec implementation.
+
+---
+
+Mit Liebe gemacht für Simone ❤️
