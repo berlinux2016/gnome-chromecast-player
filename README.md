@@ -517,15 +517,15 @@ Wenn du einen Bug findest:
 
 ## 📊 Version History
 
-### Version 1.2.0 (Dezember 2024)
+### Version 1.2.0 (Dezember 2025)
 - ✨ Timeline/Seek-Funktion für lokale und Chromecast-Wiedergabe
 - ✨ NVIDIA Hardware-Beschleunigung (NVDEC/NVENC)
 - 🐛 Verbesserte Chromecast-Kompatibilität (Xiaomi TVs)
 - ⚡ Chromecast-Gerätesuche 30x schneller (500ms statt 15s)
 - 🔧 Modus-Wechsel zwischen Lokal und Chromecast optimiert
-- 🔒 **Rechtliche Bereinigung**: Entfernung aller Software-Codecs
 
-### Version 1.0.0 (Dezember 2024)
+
+### Version 1.0.0 (Dezember 2025)
 - 🎉 Erste Version
 - ✨ AMD VA-API Hardware-Beschleunigung
 - ✨ Automatische MKV/AVI zu MP4 Konvertierung
