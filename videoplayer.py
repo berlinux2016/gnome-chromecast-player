@@ -727,6 +727,28 @@ class ChromecastManager:
             except Exception as e:
                 print(f"Status update error: {e}")
 
+    def set_volume(self, volume):
+        """Setzt Chromecast-Lautstärke (0.0 bis 1.0)"""
+        if self.selected_cast:
+            try:
+                if 0.0 <= volume <= 1.0:
+                    self.selected_cast.set_volume(volume)
+                    print(f"Chromecast Lautstärke: {volume * 100:.0f}%")
+                else:
+                    print(f"✗ Ungültiger Lautstärke-Wert: {volume} (muss zwischen 0.0 und 1.0 sein)")
+            except Exception as e:
+                print(f"✗ Fehler beim Setzen der Chromecast-Lautstärke: {e}")
+
+    def get_volume(self):
+        """Gibt aktuelle Chromecast-Lautstärke zurück (0.0 bis 1.0)"""
+        if self.selected_cast and self.selected_cast.status:
+            try:
+                return self.selected_cast.status.volume_level
+            except Exception as e:
+                print(f"✗ Fehler beim Abrufen der Chromecast-Lautstärke: {e}")
+                return 0.5  # Standardwert bei Fehler
+        return 0.5  # Standardwert wenn nicht verbunden
+
     def disconnect(self):
         if self.selected_cast:
             self.selected_cast.disconnect()
@@ -875,6 +897,18 @@ class VideoPlayer(Gtk.Box):
         )
         print(f"Lokales Seeking zu {position_seconds:.1f}s (präzise)")
 
+    def set_volume(self, volume):
+        """Setzt die Lautstärke (0.0 bis 1.0)"""
+        if 0.0 <= volume <= 1.0:
+            self.playbin.set_property("volume", volume)
+            print(f"Lokale Lautstärke: {volume * 100:.0f}%")
+        else:
+            print(f"✗ Ungültiger Lautstärke-Wert: {volume} (muss zwischen 0.0 und 1.0 sein)")
+
+    def get_volume(self):
+        """Gibt aktuelle Lautstärke zurück (0.0 bis 1.0)"""
+        return self.playbin.get_property("volume")
+
 
 class VideoPlayerWindow(Adw.ApplicationWindow):
     """Hauptfenster der Anwendung"""
@@ -932,10 +966,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Spiele-Modus (lokal oder chromecast)
         self.play_mode = "local"  # oder "chromecast"
-        
+
         # Timeline state tracking
         self.timeline_update_timeout = None
         self.is_seeking = False
+
+        # Initialisiere Lautstärke auf 100%
+        self.video_player.set_volume(1.0)
 
     def setup_header_bar(self):
         """Erstellt die Header Bar"""
@@ -1145,6 +1182,26 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         stop_button.connect("clicked", self.on_stop)
         self.control_box.append(stop_button)
 
+        # Lautstärke-Kontrolle
+        volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        volume_box.set_margin_start(24)
+
+        # Lautstärke-Icon
+        volume_icon = Gtk.Image.new_from_icon_name("audio-volume-high-symbolic")
+        volume_box.append(volume_icon)
+
+        # Lautstärke-Slider (0-100 für bessere UX)
+        self.volume_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 1
+        )
+        self.volume_scale.set_size_request(120, -1)
+        self.volume_scale.set_draw_value(False)
+        self.volume_scale.set_value(100)  # Standardwert 100%
+        self.volume_scale.connect("value-changed", self.on_volume_changed)
+        volume_box.append(self.volume_scale)
+
+        self.control_box.append(volume_box)
+
         # Mode Toggle
         mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         mode_box.set_margin_start(24)
@@ -1273,6 +1330,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 print("Stoppe lokale Wiedergabe...")
                 self.video_player.stop()
 
+            # Synchronisiere Lautstärke zum Chromecast
+            if self.cast_manager.selected_cast:
+                current_volume = self.volume_scale.get_value() / 100.0
+                def sync_volume():
+                    self.cast_manager.set_volume(current_volume)
+                thread = threading.Thread(target=sync_volume, daemon=True)
+                thread.start()
+
             # Wenn ein Video geladen ist und ein Chromecast verbunden ist,
             # starte automatisch das Streaming
             if self.current_video_path and self.cast_manager.selected_cast:
@@ -1289,6 +1354,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Wechsel zu Lokal-Modus
             self.play_mode = "local"
             self.mode_label.set_text("Lokal")
+
+            # Synchronisiere Lautstärke zum lokalen Player
+            current_volume = self.volume_scale.get_value() / 100.0
+            self.video_player.set_volume(current_volume)
 
             # Stoppe Chromecast-Streaming falls aktiv
             if self.cast_manager.mc and self.cast_manager.selected_cast:
@@ -1454,6 +1523,24 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.stop_timeline_updates()
         self.timeline_scale.set_value(0)
         self.time_label.set_text("00:00")
+
+    def on_volume_changed(self, scale):
+        """Wird aufgerufen, wenn der Lautstärke-Slider bewegt wird"""
+        volume_percent = scale.get_value()
+        volume = volume_percent / 100.0  # Konvertiere 0-100 zu 0.0-1.0
+
+        if self.play_mode == "local":
+            self.video_player.set_volume(volume)
+        else:
+            # Chromecast-Lautstärke in Thread setzen um UI nicht zu blockieren
+            if self.cast_manager.selected_cast:
+                def set_chromecast_volume():
+                    self.cast_manager.set_volume(volume)
+
+                thread = threading.Thread(target=set_chromecast_volume, daemon=True)
+                thread.start()
+            else:
+                print("⚠ Lautstärke kann nicht gesetzt werden: Kein Chromecast verbunden")
 
     def on_show_about(self, button):
         """Zeigt About-Dialog"""
