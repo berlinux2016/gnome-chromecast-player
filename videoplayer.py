@@ -2319,6 +2319,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.ab_button_clear.set_sensitive(False)
         self.control_box.append(self.ab_button_clear)
 
+        # Go-To Button (Sprung zu bestimmter Zeit)
+        self.goto_button = Gtk.Button()
+        self.goto_button.set_icon_name("go-jump-symbolic")
+        self.goto_button.set_tooltip_text("Zu Zeit springen (Taste 'G')")
+        self.goto_button.connect("clicked", self.on_show_goto_dialog)
+        self.goto_button.set_sensitive(False)
+        self.control_box.append(self.goto_button)
+
         # Lautstärke-Kontrolle
         volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         volume_box.set_margin_start(24)
@@ -2529,6 +2537,74 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.seek_to_position(self.ab_loop_a)
                 print(f"A-B Loop: Zurück zu Punkt A ({self.ab_loop_a:.1f}s)")
 
+    def on_show_goto_dialog(self, _button):
+        """Zeigt Dialog zum Springen zu einer bestimmten Zeit"""
+        duration = self.get_current_duration()
+        if not duration or duration <= 0:
+            self.status_label.set_text("Kein Video geladen")
+            return
+
+        current_position = self.get_current_position() or 0
+
+        # Erstelle Dialog
+        dialog = Adw.MessageDialog.new(self)
+        dialog.set_heading("Zu Zeit springen")
+        dialog.set_body("Gib die Zielzeit ein (Format: MM:SS oder HH:MM:SS)")
+
+        # Erstelle Entry für Zeit-Eingabe
+        entry_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        entry_box.set_margin_top(12)
+        entry_box.set_margin_bottom(12)
+        entry_box.set_margin_start(12)
+        entry_box.set_margin_end(12)
+
+        time_entry = Gtk.Entry()
+        time_entry.set_placeholder_text("z.B. 1:23:45 oder 5:30")
+        # Setze aktuelle Zeit als Vorgabe
+        time_entry.set_text(self.format_time(current_position))
+        time_entry.set_max_width_chars(10)
+        entry_box.append(time_entry)
+
+        # Info-Label
+        info_label = Gtk.Label(label=f"Video-Dauer: {self.format_time(duration)}")
+        info_label.add_css_class("dim-label")
+        entry_box.append(info_label)
+
+        dialog.set_extra_child(entry_box)
+
+        dialog.add_response("cancel", "Abbrechen")
+        dialog.add_response("jump", "Springen")
+        dialog.set_response_appearance("jump", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("jump")
+
+        def on_response(dialog, response):
+            if response == "jump":
+                time_str = time_entry.get_text().strip()
+                seconds = self.parse_time_string(time_str)
+                if seconds is not None and 0 <= seconds <= duration:
+                    self.seek_to_position(seconds)
+                    self.status_label.set_text(f"Gesprungen zu {self.format_time(seconds)}")
+                else:
+                    self.status_label.set_text("Ungültige Zeitangabe")
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def parse_time_string(self, time_str):
+        """Konvertiert Zeitstring (MM:SS oder HH:MM:SS) zu Sekunden"""
+        try:
+            parts = time_str.split(':')
+            if len(parts) == 2:  # MM:SS
+                minutes, seconds = map(int, parts)
+                return minutes * 60 + seconds
+            elif len(parts) == 3:  # HH:MM:SS
+                hours, minutes, seconds = map(int, parts)
+                return hours * 3600 + minutes * 60 + seconds
+            else:
+                return None
+        except (ValueError, AttributeError):
+            return None
+
     def on_open_file(self, button):
         """Öffnet Dateiauswahl-Dialog"""
         dialog = Gtk.FileDialog()
@@ -2586,6 +2662,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # A-B Loop Buttons aktivieren
                 self.ab_button_a.set_sensitive(True)
                 self.ab_button_b.set_sensitive(True)
+
+                # Go-To Button aktivieren
+                self.goto_button.set_sensitive(True)
 
                 # Timeline aktivieren nach kurzem Delay
                 def enable_timeline():
@@ -3235,6 +3314,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.equalizer_button.set_sensitive(True)  # Equalizer ist immer für lokale Wiedergabe verfügbar
             self.ab_button_a.set_sensitive(True)
             self.ab_button_b.set_sensitive(True)
+            self.goto_button.set_sensitive(True)
 
             # Play-Button aktualisieren
             self.play_button.set_icon_name("media-playback-pause-symbolic")
@@ -3337,7 +3417,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             "b": Gdk.KEY_b,
             "B": Gdk.KEY_B,
             "c": Gdk.KEY_c,
-            "C": Gdk.KEY_C
+            "C": Gdk.KEY_C,
+            "g": Gdk.KEY_g,
+            "G": Gdk.KEY_G
         }
 
         # Prüfe alle Shortcuts
