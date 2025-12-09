@@ -1281,8 +1281,12 @@ class VideoPlayer(Gtk.Box):
             "bitrate": "N/A"
         }
         self.current_file = filepath
-        uri = f"file://{filepath}"
-        print(f"Lade Video lokal: {filepath}")
+        # Konvertiere zu absoluten Pfad und erstelle korrekte URI
+        abs_path = str(Path(filepath).resolve())
+        # Korrekte URI mit drei Slashes für absolute Pfade
+        uri = f"file:///{abs_path}" if abs_path.startswith('/') else f"file://{abs_path}"
+        print(f"Lade Video lokal: {abs_path}")
+        print(f"URI: {uri}")
         self.playbin.set_state(Gst.State.NULL)
         self.playbin.set_property("uri", uri)
         self.playbin.set_state(Gst.State.PAUSED)
