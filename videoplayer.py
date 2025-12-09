@@ -11,6 +11,9 @@ import time
 import socket
 import re
 import subprocess
+import json
+import hashlib
+import random
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import quote
@@ -29,42 +32,123 @@ Gst.init(None)
 
 # GPU-Erkennung und Hardware-Beschleunigung
 def detect_gpu():
-    """Erkennt die GPU und setzt entsprechende Umgebungsvariablen"""
+    """Erweitertes GPU-Erkennung"""
+    gpu_info = {
+        'type': 'unknown',
+        'name': 'Unknown',
+        'vram': 0
+    }
+    
     try:
-        # Prüfe auf NVIDIA GPU
-        nvidia_check = subprocess.run(['nvidia-smi', '-L'],
-                                     capture_output=True,
-                                     text=True,
-                                     timeout=2)
-        if nvidia_check.returncode == 0 and 'GPU' in nvidia_check.stdout:
-            print("✓ NVIDIA GPU erkannt")
-            os.environ['VDPAU_DRIVER'] = 'nvidia'
-            # NVIDIA nutzt VDPAU und NVDEC
-            return 'nvidia'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # NVIDIA mit nvidia-smi
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total',
+                               '--format=csv,noheader,nounits'],
+                             capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            gpu_info['type'] = 'nvidia'
+            if ',' in result.stdout:
+                name, vram = result.stdout.strip().split(',')
+                gpu_info['name'] = name.strip()
+                gpu_info['vram'] = int(vram.strip())
+            print(f"✓ NVIDIA GPU: {gpu_info['name']} ({gpu_info['vram']}MB)")
+            return gpu_info
+    
+    except:
         pass
-
+    
     try:
-        # Prüfe auf AMD GPU
-        lspci_check = subprocess.run(['lspci'],
-                                     capture_output=True,
-                                     text=True,
-                                     timeout=2)
-        if 'AMD' in lspci_check.stdout or 'Radeon' in lspci_check.stdout:
-            print("✓ AMD GPU erkannt")
-            os.environ['LIBVA_DRIVER_NAME'] = 'radeonsi'
-            os.environ['VDPAU_DRIVER'] = 'radeonsi'
-            return 'amd'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # AMD/Intel mit lspci
+        result = subprocess.run(['lspci', '-vmm', '-d', '::0300'],
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.strip().split('\n\n')
+            for device in lines:
+                if 'AMD' in device or 'Radeon' in device:
+                    gpu_info['type'] = 'amd'
+                    for line in device.split('\n'):
+                        if line.startswith('Device:'):
+                            gpu_info['name'] = line.split(':', 1)[1].strip()
+                    print(f"✓ AMD GPU: {gpu_info['name']}")
+                    return gpu_info
+                elif 'Intel' in device:
+                    gpu_info['type'] = 'intel'
+                    for line in device.split('\n'):
+                        if line.startswith('Device:'):
+                            gpu_info['name'] = line.split(':', 1)[1].strip()
+                    print(f"✓ Intel GPU: {gpu_info['name']}")
+                    return gpu_info
+    except:
         pass
-
-    # Fallback zu AMD (Standard)
+    
     print("ℹ Keine spezifische GPU erkannt, nutze AMD-Einstellungen")
     os.environ['LIBVA_DRIVER_NAME'] = 'radeonsi'
     os.environ['VDPAU_DRIVER'] = 'radeonsi'
-    return 'unknown'
+    return gpu_info
 
-GPU_TYPE = detect_gpu()
+GPU_INFO = detect_gpu()
+GPU_TYPE = GPU_INFO['type']
+
+
+class ConfigManager:
+    """Verwaltet Anwendungseinstellungen"""
+    
+    def __init__(self):
+        self.config_dir = Path.home() / ".config" / "video-chromecast-player"
+        self.config_file = self.config_dir / "settings.json"
+        self.config_dir.mkdir(exist_ok=True)
+        
+        self.default_settings = {
+            "last_directory": str(Path.home()),
+            "volume": 1.0,
+            "window_width": 1000,
+            "window_height": 700,
+            "chromecast_device": None,
+            "play_mode": "local",
+            "hardware_acceleration": True,
+            "auto_convert_mkv": True,
+            "cache_size_gb": 10,
+            "keyboard_shortcuts": {
+                "play_pause": "space",
+                "fullscreen": "F11",
+                "volume_up": "Up",
+                "volume_down": "Down",
+                "seek_forward": "Right",
+                "seek_backward": "Left",
+                "mute": "m",
+                "next_video": "n",
+                "previous_video": "p"
+            }
+        }
+        self.settings = self.load_settings()
+    
+    def load_settings(self):
+        """Lädt gespeicherte Einstellungen"""
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r') as f:
+                    loaded = json.load(f)
+                    # Merge mit Defaults
+                    return {**self.default_settings, **loaded}
+            except Exception as e:
+                print(f"Fehler beim Laden der Einstellungen: {e}")
+        return self.default_settings.copy()
+    
+    def save_settings(self):
+        """Speichert Einstellungen"""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception as e:
+            print(f"Fehler beim Speichern der Einstellungen: {e}")
+    
+    def get_setting(self, key, default=None):
+        """Gibt eine Einstellung zurück"""
+        return self.settings.get(key, default)
+    
+    def set_setting(self, key, value):
+        """Setzt eine Einstellung"""
+        self.settings[key] = value
+        self.save_settings()
 
 
 class VideoConverter:
@@ -74,12 +158,38 @@ class VideoConverter:
         self.conversion_cache_dir = Path.home() / ".cache" / "video-chromecast-player"
         self.conversion_cache_dir.mkdir(parents=True, exist_ok=True)
         self.active_conversions = {}
+        self.cleanup_old_cache_files(max_age_days=7, max_size_gb=10)
+
+    def cleanup_old_cache_files(self, max_age_days=7, max_size_gb=10):
+        """Bereinigt alte Cache-Dateien"""
+        now = time.time()
+        max_size_bytes = max_size_gb * 1024**3
+        total_size = 0
+        
+        cache_files = []
+        for file in self.conversion_cache_dir.glob("*.mp4"):
+            file_age = now - file.stat().st_mtime
+            file_size = file.stat().st_size
+            
+            if file_age > max_age_days * 86400:
+                file.unlink()
+                print(f"✗ Alte Cache-Datei gelöscht: {file.name}")
+            else:
+                cache_files.append((file, file_size))
+                total_size += file_size
+        
+        # Wenn Cache zu groß, älteste Dateien löschen
+        cache_files.sort(key=lambda x: x[0].stat().st_mtime)
+        while total_size > max_size_bytes and cache_files:
+            file_to_delete, file_size = cache_files.pop(0)
+            file_to_delete.unlink()
+            total_size -= file_size
+            print(f"✗ Cache-Datei gelöscht (Größenlimit): {file_to_delete.name}")
 
     def get_cached_mp4_path(self, mkv_path):
         """Generiert Pfad für konvertierte MP4-Datei im Cache"""
         mkv_file = Path(mkv_path)
         # Nutze Hash des Original-Pfads + Dateiname für eindeutigen Cache-Key
-        import hashlib
         path_hash = hashlib.md5(str(mkv_file.absolute()).encode()).hexdigest()[:8]
         mp4_name = f"{mkv_file.stem}_{path_hash}.mp4"
         return self.conversion_cache_dir / mp4_name
@@ -134,6 +244,7 @@ class VideoConverter:
                 '-i', str(input_file),
                 '-c', 'copy',  # Kopiere Streams ohne Re-Encoding
                 '-movflags', '+faststart',  # Optimiere für Streaming
+                '-progress', 'pipe:1',  # Fortschritt ausgeben
                 '-y',  # Überschreibe falls vorhanden
                 str(output_path)
             ]
@@ -144,12 +255,19 @@ class VideoConverter:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
             )
 
-            # Warte auf Abschluss
-            stdout, stderr = process.communicate()
+            # Parse Fortschritt in Echtzeit
+            for line in iter(process.stdout.readline, ''):
+                if 'time=' in line and progress_callback:
+                    time_match = re.search(r'time=(\d+:\d+:\d+\.\d+)', line)
+                    if time_match:
+                        GLib.idle_add(progress_callback, f"Konvertiere... {time_match.group(1)}")
+
+            process.wait()
 
             if process.returncode == 0:
                 print(f"✓ Konvertierung erfolgreich!")
@@ -159,9 +277,6 @@ class VideoConverter:
                 return str(output_path)
             else:
                 print(f"✗ Schnelle Konvertierung fehlgeschlagen, versuche Re-Encoding...")
-                print(f"  FFmpeg Fehler: {stderr[:500]}")
-
-                # Fallback: Mit Re-Encoding (langsamer aber sicherer)
                 return self.convert_with_reencoding(input_file, output_path, progress_callback)
 
         except Exception as e:
@@ -219,17 +334,39 @@ class VideoConverter:
                 print(f"  ✗ Fehler beim Prüfen von VAAPI: {e}")
                 video_codec = None
 
+        elif GPU_TYPE == 'intel':
+            print("Nutze Intel QSV Hardware-Encoding...")
+            try:
+                qsv_check = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'],
+                                          capture_output=True, text=True, timeout=5)
+                if 'h264_qsv' in qsv_check.stdout:
+                    video_codec = 'h264_qsv'
+                    video_params = [
+                        '-c:v', 'h264_qsv',
+                        '-profile:v', 'high',
+                        '-level', '4.1',
+                        '-b:v', '5M',
+                    ]
+                    print("  ✓ Encoder: Intel QSV (Hardware-beschleunigt)")
+                else:
+                    print("  ✗ Intel QSV Encoder nicht verfügbar")
+                    video_codec = None
+            except Exception as e:
+                print(f"  ✗ Fehler beim Prüfen von QSV: {e}")
+                video_codec = None
+
         # Keine Hardware-Beschleunigung verfügbar
         if video_codec is None:
             error_msg = (
                 "❌ Hardware-Beschleunigung nicht verfügbar!\n\n"
                 "Dieses Programm benötigt Hardware-Encoding für MKV/AVI Konvertierung.\n\n"
                 "Bitte stelle sicher, dass:\n"
-                "• Eine kompatible GPU installiert ist (AMD mit VAAPI oder NVIDIA mit NVENC)\n"
+                "• Eine kompatible GPU installiert ist (AMD mit VAAPI oder NVIDIA mit NVENC oder Intel QSV)\n"
                 "• Die entsprechenden Treiber installiert sind\n"
                 "• FFmpeg mit Hardware-Unterstützung installiert ist\n\n"
                 "Für AMD: sudo dnf install mesa-va-drivers ffmpeg\n"
-                "Für NVIDIA: sudo dnf install nvidia-driver ffmpeg\n\n"
+                "Für NVIDIA: sudo dnf install nvidia-driver ffmpeg\n"
+                "Für Intel: sudo dnf install intel-media-driver ffmpeg\n\n"
                 "Alternative: Konvertiere die Datei manuell zu MP4 und lade dann die MP4-Datei."
             )
             print("\n" + error_msg)
@@ -259,6 +396,7 @@ class VideoConverter:
                 '-ac', '2',
                 # MP4-Optimierungen
                 '-movflags', '+faststart',
+                '-progress', 'pipe:1',
                 '-f', 'mp4',
                 '-y',
                 str(output_path)
@@ -269,11 +407,19 @@ class VideoConverter:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
             )
 
-            stdout, stderr = process.communicate()
+            # Parse Fortschritt in Echtzeit
+            for line in iter(process.stdout.readline, ''):
+                if 'time=' in line and progress_callback:
+                    time_match = re.search(r'time=(\d+:\d+:\d+\.\d+)', line)
+                    if time_match:
+                        GLib.idle_add(progress_callback, f"Re-Encoding... {time_match.group(1)}")
+
+            process.wait()
 
             if process.returncode == 0:
                 print(f"✓ Re-Encoding erfolgreich!")
@@ -282,7 +428,7 @@ class VideoConverter:
                     GLib.idle_add(progress_callback, "Re-Encoding abgeschlossen!")
                 return str(output_path)
             else:
-                print(f"✗ Re-Encoding fehlgeschlagen: {stderr[:500]}")
+                print(f"✗ Re-Encoding fehlgeschlagen")
                 if output_path.exists():
                     output_path.unlink()
                 return None
@@ -405,7 +551,6 @@ class VideoHTTPServer:
             # Versuche mehrere Ports, falls 8765 belegt ist
             ports_to_try = [self.port, 8766, 8767, 8768, 8080, 8888]
             server_started = False
-
 
             for port in ports_to_try:
                 try:
@@ -534,7 +679,6 @@ class ChromecastManager:
             # Erstelle das Chromecast-Objekt direkt aus den Host-Informationen des
             # gefundenen Service. Dies ist der zuverlässigste Weg, da er keine neue
             # Suche startet und die bestehende Zeroconf-Instanz korrekt weiterverwendet.
-            # Die Funktion get_chromecast_from_host ist für ältere pychromecast-Versionen.
             self.selected_cast = pychromecast.get_chromecast_from_host(
                 (service.host, service.port, service.uuid, service.model_name, service.friendly_name),
             )
@@ -671,7 +815,7 @@ class ChromecastManager:
             print("  3. Netzwerkprobleme zwischen Computer und Chromecast")
             print("  4. Video-Codec wird nicht unterstützt")
             print("\nFirewall öffnen:")
-            print(f"  sudo firewall-cmd --permanent --add-port={self.http_server.port if hasattr(self, 'http_server') else '8765'}/tcp")
+            print(f"  sudo firewall-cmd --permanent --add-port=8765/tcp")
             print("  sudo firewall-cmd --reload")
             import traceback
             traceback.print_exc()
@@ -766,6 +910,197 @@ class ChromecastManager:
             self._zconf_instance = None
 
 
+class PlaylistManager:
+    """Verwaltet die Video-Playlist"""
+
+    def __init__(self):
+        self.playlist = []  # Liste von Video-Pfaden
+        self.current_index = -1  # Aktueller Index in der Playlist
+        self.play_history = []  # Wiedergabeverlauf
+        self.playlist_file = None
+
+    def add_video(self, video_path):
+        """Fügt ein Video zur Playlist hinzu"""
+        if video_path not in self.playlist:
+            self.playlist.append(video_path)
+            print(f"✓ Video zur Playlist hinzugefügt: {Path(video_path).name}")
+            return True
+        else:
+            print(f"ℹ Video bereits in Playlist: {Path(video_path).name}")
+            return False
+
+    def remove_video(self, index):
+        """Entfernt ein Video aus der Playlist"""
+        if 0 <= index < len(self.playlist):
+            removed = self.playlist.pop(index)
+            print(f"✓ Video aus Playlist entfernt: {Path(removed).name}")
+            # Aktualisiere current_index wenn nötig
+            if index < self.current_index:
+                self.current_index -= 1
+            elif index == self.current_index:
+                self.current_index = -1
+            return True
+        return False
+
+    def clear_playlist(self):
+        """Leert die gesamte Playlist"""
+        self.playlist.clear()
+        self.current_index = -1
+        self.play_history.clear()
+        print("✓ Playlist geleert")
+
+    def get_current_video(self):
+        """Gibt den Pfad des aktuellen Videos zurück"""
+        if 0 <= self.current_index < len(self.playlist):
+            return self.playlist[self.current_index]
+        return None
+
+    def next_video(self):
+        """Springt zum nächsten Video"""
+        if self.current_index < len(self.playlist) - 1:
+            if self.current_index >= 0:
+                self.play_history.append(self.current_index)
+            self.current_index += 1
+            return self.get_current_video()
+        return None
+
+    def previous_video(self):
+        """Springt zum vorherigen Video"""
+        if self.play_history:
+            self.current_index = self.play_history.pop()
+            return self.get_current_video()
+        elif self.current_index > 0:
+            self.current_index -= 1
+            return self.get_current_video()
+        return None
+
+    def set_current_index(self, index):
+        """Setzt den aktuellen Index"""
+        if 0 <= index < len(self.playlist):
+            self.current_index = index
+            return True
+        return False
+
+    def has_next(self):
+        """Prüft ob es ein nächstes Video gibt"""
+        return self.current_index < len(self.playlist) - 1
+
+    def has_previous(self):
+        """Prüft ob es ein vorheriges Video gibt"""
+        return self.current_index > 0 or len(self.play_history) > 0
+
+    def get_playlist_length(self):
+        """Gibt die Anzahl der Videos in der Playlist zurück"""
+        return len(self.playlist)
+
+    def move_video(self, from_index, to_index):
+        """Verschiebt ein Video innerhalb der Playlist"""
+        if 0 <= from_index < len(self.playlist) and 0 <= to_index < len(self.playlist):
+            video = self.playlist.pop(from_index)
+            self.playlist.insert(to_index, video)
+            # Aktualisiere current_index
+            if self.current_index == from_index:
+                self.current_index = to_index
+            elif from_index < self.current_index <= to_index:
+                self.current_index -= 1
+            elif to_index <= self.current_index < from_index:
+                self.current_index += 1
+            return True
+        return False
+
+    def save_playlist(self, filepath):
+        """Speichert Playlist als M3U-Datei"""
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("#EXTM3U\n")
+                for video_path in self.playlist:
+                    video_name = Path(video_path).name
+                    f.write(f"#EXTINF:-1,{video_name}\n")
+                    f.write(f"{video_path}\n")
+            self.playlist_file = filepath
+            print(f"✓ Playlist gespeichert: {filepath}")
+            return True
+        except Exception as e:
+            print(f"✗ Fehler beim Speichern der Playlist: {e}")
+            return False
+
+    def shuffle_playlist(self):
+        """Mischt die Playlist zufällig"""
+        import random
+        current_video = self.get_current_video()
+        
+        # Speichere aktuelle Position
+        if current_video:
+            current_pos = self.current_index
+        
+        random.shuffle(self.playlist)
+        
+        # Wiederherstellung der aktuellen Position
+        if current_video and current_video in self.playlist:
+            self.current_index = self.playlist.index(current_video)
+        else:
+            self.current_index = -1
+        
+        print("✓ Playlist gemischt")
+
+    def remove_duplicates(self):
+        """Entfernt doppelte Einträge aus der Playlist"""
+        unique_videos = []
+        seen = set()
+        
+        for video_path in self.playlist:
+            if video_path not in seen:
+                seen.add(video_path)
+                unique_videos.append(video_path)
+        
+        removed_count = len(self.playlist) - len(unique_videos)
+        if removed_count > 0:
+            self.playlist = unique_videos
+            # Aktuellen Index korrigieren
+            if 0 <= self.current_index < len(self.playlist):
+                current_video = self.playlist[self.current_index]
+            else:
+                self.current_index = -1
+            
+            print(f"✓ {removed_count} doppelte Einträge entfernt")
+            return True
+        
+        return False
+
+    def search_subtitles(self, video_path):
+        """Sucht automatisch nach passenden Untertiteln"""
+        video_file = Path(video_path)
+        video_dir = video_file.parent
+        video_stem = video_file.stem
+        
+        subtitle_formats = ['.srt', '.ass', '.ssa', '.vtt', '.sub']
+        found_subtitles = []
+        
+        # Suche im gleichen Verzeichnis
+        for sub_format in subtitle_formats:
+            subtitle_file = video_dir / f"{video_stem}{sub_format}"
+            if subtitle_file.exists():
+                found_subtitles.append(str(subtitle_file))
+            
+            # Alternative Benennungen
+            subtitle_file = video_dir / f"{video_stem}.de{sub_format}"
+            if subtitle_file.exists():
+                found_subtitles.append(str(subtitle_file))
+                
+            subtitle_file = video_dir / f"{video_stem}.en{sub_format}"
+            if subtitle_file.exists():
+                found_subtitles.append(str(subtitle_file))
+        
+        # Durchsuche auch Untertitel-Unterverzeichnis
+        sub_dir = video_dir / "Subs" / video_stem
+        if sub_dir.exists():
+            for sub_file in sub_dir.glob("*"):
+                if sub_file.suffix.lower() in subtitle_formats:
+                    found_subtitles.append(str(sub_file))
+        
+        return found_subtitles
+
+
 class VideoPlayer(Gtk.Box):
     """Video-Player-Widget mit GStreamer und Hardware-Beschleunigung"""
 
@@ -775,6 +1110,10 @@ class VideoPlayer(Gtk.Box):
         # GStreamer Pipeline mit Hardware-Beschleunigung
         self.playbin = Gst.ElementFactory.make("playbin", "player")
 
+        # Aktiviere Untertitel-Verarbeitung
+        flags = self.playbin.get_property("flags")
+        flags |= (1 << 2)  # GST_PLAY_FLAG_TEXT
+        self.playbin.set_property("flags", flags)
         # Hardware-Beschleunigung aktivieren
         self.setup_hardware_acceleration()
 
@@ -782,6 +1121,7 @@ class VideoPlayer(Gtk.Box):
         self.video_widget = Gtk.Picture()
         self.video_widget.set_size_request(800, 450)
         self.video_widget.set_vexpand(True)
+        self.video_widget.set_content_fit(Gtk.ContentFit.COVER)
         self.video_widget.set_hexpand(True)
 
         # Video-Sink für GTK
@@ -799,6 +1139,13 @@ class VideoPlayer(Gtk.Box):
 
         self.current_file = None
         self.hw_accel_enabled = False
+        self.info_callback = None
+        # Zustand für Video-Infos, um Flackern zu vermeiden
+        self._video_info = {
+            "resolution": "N/A",
+            "codec": "N/A",
+            "bitrate": "N/A"
+        }
 
     def setup_hardware_acceleration(self):
         """Konfiguriert Hardware-Beschleunigung (AMD VA-API / NVIDIA NVDEC)"""
@@ -825,6 +1172,15 @@ class VideoPlayer(Gtk.Box):
                 else:
                     print("⚠ VA-API nicht verfügbar, prüfe ob gstreamer1-vaapi installiert ist")
 
+            elif GPU_TYPE == 'intel':
+                # Intel VA-API Hardware-Beschleunigung
+                vaapi_dec = Gst.ElementFactory.find("vaapidecodebin")
+                if vaapi_dec:
+                    hw_decoder = 'vaapi'
+                    print("✓ Hardware-Beschleunigung (Intel VA-API) aktiviert")
+                else:
+                    print("⚠ VA-API nicht verfügbar für Intel GPU")
+
             if hw_decoder:
                 # Setze Hardware-Decoder-Präferenz
                 flags = self.playbin.get_property("flags")
@@ -844,6 +1200,12 @@ class VideoPlayer(Gtk.Box):
 
     def load_video(self, filepath):
         """Lädt eine Video-Datei"""
+        # Setze Video-Infos für neue Datei zurück
+        self._video_info = {
+            "resolution": "N/A",
+            "codec": "N/A",
+            "bitrate": "N/A"
+        }
         self.current_file = filepath
         uri = f"file://{filepath}"
         print(f"Lade Video lokal: {filepath}")
@@ -868,6 +1230,18 @@ class VideoPlayer(Gtk.Box):
             print(f"GStreamer Fehler: {err}, {debug}")
         elif t == Gst.MessageType.EOS:
             self.playbin.set_state(Gst.State.NULL)
+            # Signal an Parent-Window senden
+            if hasattr(self, 'eos_callback') and self.eos_callback:
+                GLib.idle_add(self.eos_callback)
+        elif t == Gst.MessageType.TAG and self.info_callback:
+            taglist = message.parse_tag()
+            # Wir rufen die Extraktion auf, die dann die Tags und Caps verarbeitet
+            self.extract_video_info(taglist)
+
+        elif t == Gst.MessageType.ASYNC_DONE:
+            # Ein guter Zeitpunkt, um nach Untertiteln zu suchen, da die Streams jetzt bekannt sind
+            if hasattr(self, 'streams_ready_callback') and self.streams_ready_callback:
+                GLib.idle_add(self.streams_ready_callback)
 
     def get_position(self):
         """Gibt aktuelle Position in Sekunden zurück"""
@@ -909,6 +1283,82 @@ class VideoPlayer(Gtk.Box):
         """Gibt aktuelle Lautstärke zurück (0.0 bis 1.0)"""
         return self.playbin.get_property("volume")
 
+    def get_subtitle_tracks(self):
+        """Gibt eine Liste der verfügbaren Untertitel-Spuren zurück."""
+        tracks = []
+        n_text = self.playbin.get_n_text()
+        for i in range(n_text):
+            tags = self.playbin.get_text_tags(i)
+            if tags:
+                lang, _ = tags.get_string(Gst.TAG_LANGUAGE_CODE)
+                title, _ = tags.get_string(Gst.TAG_TITLE)
+                
+                description = f"Spur {i+1}"
+                if title:
+                    description = title
+                elif lang:
+                    description = f"Spur {i+1} ({lang})"
+                
+                tracks.append({"index": i, "description": description})
+        return tracks
+
+    def set_subtitle_track(self, index):
+        """Setzt die aktive Untertitel-Spur. -1 zum Deaktivieren."""
+        self.playbin.set_property("current-text", index)
+
+    def extract_video_info(self, taglist):
+        """Extrahiert Video-Informationen aus dem GStreamer-Stream."""
+        # Diese Funktion wird aufgerufen, wenn eine TAG-Nachricht empfangen wird.
+        # Sie extrahiert Codec/Bitrate aus den Tags und die Auflösung aus den Caps.
+
+        def get_and_send_info():
+            try:
+                # 1. Auflösung aus den Video-Sink-Capabilities extrahieren
+                video_sink = self.playbin.get_property("video-sink")
+                if video_sink:
+                    pad = video_sink.get_static_pad("sink")
+                    if pad:
+                        peer_pad = pad.get_peer()
+                        if peer_pad:
+                            caps = peer_pad.get_current_caps()
+                            if caps:
+                                struct = caps.get_structure(0)
+                                if struct and struct.has_field("width") and struct.has_field("height"):
+                                    width = struct.get_int("width").value
+                                    height = struct.get_int("height").value
+                                    # Nur aktualisieren, wenn es ein gültiger Wert ist
+                                    self._video_info["resolution"] = f"{width}x{height}"
+
+                # 2. Codec aus den Tags extrahieren
+                success, value = taglist.get_string(Gst.TAG_VIDEO_CODEC)
+                if success:
+                    # Formatieren für bessere Lesbarkeit (z.B. "H.264 (High Profile)")
+                    self._video_info["codec"] = value.split(',')[0].replace(" decoder", "")
+                else:
+                    # Fallback, falls der Tag nicht da ist
+                    success, value = taglist.get_string(Gst.TAG_CODEC)
+                    if success:
+                        # Nur aktualisieren, wenn es ein Video-Codec ist und wir noch keinen haben
+                        if "video" in value and self._video_info["codec"] == "N/A":
+                           self._video_info["codec"] = value.split(',')[0].replace(" decoder", "")
+
+                # 3. Bitrate aus den Tags extrahieren
+                # Nur aktualisieren, wenn ein gültiger Wert > 0 gefunden wird.
+                # Dadurch wird ein existierender Wert nicht mit N/A überschrieben.
+                success, bitrate = taglist.get_uint(Gst.TAG_BITRATE)
+                if success and bitrate > 0:
+                    self._video_info["bitrate"] = f"{bitrate / 1000:.0f} kbps"
+
+                # Rufe den UI-Callback immer mit dem aktuellen Zustand des Dictionaries auf
+                GLib.idle_add(self.info_callback, self._video_info)
+
+            except Exception as e:
+                print(f"Fehler beim Extrahieren der Video-Infos: {e}")
+
+        # Führe die Info-Extraktion nach einer kurzen Verzögerung aus,
+        # um sicherzustellen, dass auch die Auflösung verfügbar ist.
+        GLib.timeout_add(250, lambda: (get_and_send_info(), False))
+
 
 class VideoPlayerWindow(Adw.ApplicationWindow):
     """Hauptfenster der Anwendung"""
@@ -919,14 +1369,22 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.set_title("Video Chromecast Player")
         self.set_default_size(1000, 700)
 
+        # Config Manager
+        self.config = ConfigManager()
+        
         # Chromecast Manager, HTTP-Server und Video-Converter
         self.cast_manager = ChromecastManager()
         self.http_server = VideoHTTPServer()
         self.video_converter = VideoConverter()
+        self.playlist_manager = PlaylistManager()
         self.current_video_path = None
 
         # Standby-Inhibitor (verhindert Standby während Streaming)
         self.inhibit_cookie = None
+
+        # Zustand für Stummschaltung
+        self.is_muted = False
+        self.last_volume = 1.0
 
         # Cleanup beim Schließen
         self.connect("close-request", self.on_close_request)
@@ -944,9 +1402,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         content_box.set_margin_top(12)
         content_box.set_margin_bottom(12)
 
-        # Video Player
+        # Video Player und Info-Overlay
+        self.video_overlay = Gtk.Overlay()
+        content_box.append(self.video_overlay)
+
         self.video_player = VideoPlayer()
-        content_box.append(self.video_player)
+        self.video_overlay.set_child(self.video_player)
+
+        self.info_label = Gtk.Label()
+        self.info_label.set_valign(Gtk.Align.START)
+        self.info_label.set_halign(Gtk.Align.START)
+        self.info_label.set_margin_start(10)
+        self.info_label.set_margin_top(10)
+        self.info_label.add_css_class("info-overlay")
+        self.video_overlay.add_overlay(self.info_label)
 
         # Seitenleiste für Chromecast
         self.setup_sidebar()
@@ -955,8 +1424,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.main_box.append(content_box)
 
         # Timeline/Seek Bar
-        timeline_widget = self.setup_timeline()
-        self.main_box.append(timeline_widget)
+        self.timeline_widget = self.setup_timeline()
+        self.main_box.append(self.timeline_widget)
+
+        # Spiele-Modus (lokal oder chromecast) - muss vor setup_controls() initialisiert werden
+        self.play_mode = self.config.get_setting("play_mode", "local")
 
         # Kontrollleiste
         self.setup_controls()
@@ -964,15 +1436,164 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         self.set_content(self.main_box)
 
-        # Spiele-Modus (lokal oder chromecast)
-        self.play_mode = "local"  # oder "chromecast"
-
         # Timeline state tracking
         self.timeline_update_timeout = None
         self.is_seeking = False
 
-        # Initialisiere Lautstärke auf 100%
-        self.video_player.set_volume(1.0)
+        # Initialisiere Lautstärke
+        saved_volume = self.config.get_setting("volume", 1.0)
+        self.video_player.set_volume(saved_volume)
+        self.volume_scale.set_value(saved_volume * 100)
+
+        # Setze EOS-Callback für Auto-Advance
+        self.video_player.eos_callback = self.on_video_ended
+
+        # Setze Info-Callback
+        self.video_player.info_callback = self.show_video_info
+
+        # Setze Callback für Stream-Erkennung (für Untertitel)
+        self.video_player.streams_ready_callback = self.update_subtitle_menu
+
+        # Drag-and-Drop Setup
+        self.setup_drag_and_drop()
+
+        # Tastatur-Events (für F11 Vollbild)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.add_controller(key_controller)
+
+        # CSS für visuelles Drag-and-Drop Feedback
+        self.setup_drop_css()
+
+        # Initialisiere Modus-Switch basierend auf gespeicherten Einstellungen
+        if self.play_mode == "chromecast":
+            self.mode_switch.set_active(True)
+        else:
+            self.mode_switch.set_active(False)
+
+        # Window-Größe wiederherstellen
+        window_width = self.config.get_setting("window_width", 1000)
+        window_height = self.config.get_setting("window_height", 700)
+        self.set_default_size(window_width, window_height)
+
+    def setup_drop_css(self):
+        """Fügt CSS für Drag-and-Drop visuelles Feedback hinzu"""
+        css_provider = Gtk.CssProvider()
+        css = b"""
+        .drop-active {
+            border: 3px dashed #3584e4;
+            border-radius: 12px;
+            background-color: alpha(#3584e4, 0.1);
+        }
+        .info-overlay {
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 10pt;
+        }
+        .monospace {
+            font-family: monospace;
+        }
+        """
+        css_provider.load_from_data(css)
+
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+    def setup_drag_and_drop(self):
+        """Richtet Drag-and-Drop für Videos ein"""
+        # Erstelle DropTarget für Dateien
+        drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+
+        # Verbinde Callbacks
+        drop_target.connect("drop", self.on_drop)
+        drop_target.connect("enter", self.on_drag_enter)
+        drop_target.connect("leave", self.on_drag_leave)
+
+        # Füge DropTarget zum Video-Player hinzu
+        self.video_player.add_controller(drop_target)
+
+        print("✓ Drag-and-Drop aktiviert")
+
+    def on_drag_enter(self, drop_target, x, y):
+        """Wird aufgerufen, wenn eine Datei über das Fenster gezogen wird"""
+        # Visuelles Feedback: Markiere den Drop-Bereich
+        self.video_player.add_css_class("drop-active")
+        return Gdk.DragAction.COPY
+
+    def on_drag_leave(self, drop_target):
+        """Wird aufgerufen, wenn die Datei den Drop-Bereich verlässt"""
+        # Entferne visuelles Feedback
+        self.video_player.remove_css_class("drop-active")
+
+    def on_drop(self, drop_target, value, x, y):
+        """Wird aufgerufen, wenn Dateien abgelegt werden"""
+        # Entferne visuelles Feedback
+        self.video_player.remove_css_class("drop-active")
+
+        if isinstance(value, Gdk.FileList):
+            files = value.get_files()
+            if files:
+                print(f"\n=== Drag-and-Drop: {len(files)} Datei(en) erkannt ===")
+
+                video_files = []
+                for file in files:
+                    filepath = file.get_path()
+                    filename = Path(filepath).name
+
+                    # Prüfe ob es eine Video-Datei ist
+                    if filepath.lower().endswith(('.mp4', '.mkv', '.avi', '.webm', '.mov', '.flv', '.ogg', '.mpeg', '.mpg', '.ts', '.wmv', '.m4v')):
+                        video_files.append(filepath)
+                        print(f"  ✓ {filename}")
+                    else:
+                        print(f"  ✗ Übersprungen (kein Video): {filename}")
+
+                if video_files:
+                    # Füge alle Videos zur Playlist hinzu
+                    for video_path in video_files:
+                        self.playlist_manager.add_video(video_path)
+
+                    # Aktualisiere UI
+                    self.update_playlist_ui()
+
+                    # Starte Wiedergabe des ersten Videos (wenn noch keins spielt)
+                    if self.playlist_manager.current_index == -1 and len(video_files) > 0:
+                        self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - len(video_files))
+                        first_video = self.playlist_manager.get_current_video()
+                        if first_video:
+                            self.load_and_play_video(first_video)
+
+                    self.status_label.set_text(f"{len(video_files)} Video(s) zur Playlist hinzugefügt")
+                    return True
+                else:
+                    self.status_label.set_text("Keine gültigen Video-Dateien gefunden")
+                    return False
+
+        return False
+
+    def on_video_ended(self):
+        """Wird aufgerufen, wenn ein Video zu Ende ist"""
+        print("Video zu Ende - prüfe auf nächstes Video in Playlist")
+
+        # Wenn es ein nächstes Video gibt, spiele es ab
+        if self.playlist_manager.has_next():
+            next_video = self.playlist_manager.next_video()
+            if next_video:
+                print(f"Auto-Advance: Spiele nächstes Video ab")
+                self.load_and_play_video(next_video)
+                self.update_playlist_ui()
+        else:
+            print("Keine weiteren Videos in Playlist")
+            self.stop_timeline_updates()
+            self.timeline_scale.set_value(0)
+            self.time_label.set_text("00:00")
+            # Erlaube wieder Standby, da die Wiedergabe beendet ist
+            if self.play_mode == "chromecast":
+                self.uninhibit_suspend()
 
     def setup_header_bar(self):
         """Erstellt die Header Bar"""
@@ -999,21 +1620,117 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         scan_button.connect("clicked", self.on_scan_chromecasts)
         header.pack_end(scan_button)
 
+        # Untertitel-Button
+        self.subtitle_button = Gtk.MenuButton()
+        self.subtitle_button.set_icon_name("media-view-subtitles-symbolic")
+        self.subtitle_button.set_tooltip_text("Untertitel auswählen")
+        self.subtitle_button.set_sensitive(False) # Deaktiviert bis Video geladen
+        
+        self.subtitle_popover = Gtk.PopoverMenu()
+        self.subtitle_button.set_popover(self.subtitle_popover)
+        header.pack_end(self.subtitle_button)
+
+        # Vollbild-Button
+        self.fullscreen_button = Gtk.Button()
+        self.fullscreen_button.set_icon_name("view-fullscreen-symbolic")
+        self.fullscreen_button.set_tooltip_text("Vollbild (F11)")
+        self.fullscreen_button.connect("clicked", self.on_toggle_fullscreen)
+        header.pack_end(self.fullscreen_button)
+
+        # Loading Spinner
+        self.loading_spinner = Gtk.Spinner()
+        self.loading_spinner.set_size_request(24, 24)
+        self.loading_spinner.set_visible(False)
+        header.pack_end(self.loading_spinner)
+
         self.main_box.append(header)
 
     def setup_sidebar(self):
-        """Erstellt die Seitenleiste für Chromecast"""
-        self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.sidebar.set_size_request(250, -1)
+        """Erstellt die Seitenleiste für Playlist und Chromecast"""
+        self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.sidebar.set_size_request(280, -1)
 
-        # Überschrift
+        # === PLAYLIST SECTION ===
+        playlist_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        # Playlist Überschrift mit Zähler
+        playlist_header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        playlist_label = Gtk.Label(label="Playlist")
+        playlist_label.add_css_class("title-3")
+        playlist_header_box.append(playlist_label)
+
+        self.playlist_count_label = Gtk.Label(label="(0)")
+        self.playlist_count_label.add_css_class("dim-label")
+        playlist_header_box.append(self.playlist_count_label)
+
+        playlist_section.append(playlist_header_box)
+
+        # Playlist Buttons
+        playlist_button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        add_playlist_button = Gtk.Button()
+        add_playlist_button.set_icon_name("list-add-symbolic")
+        add_playlist_button.set_tooltip_text("Videos zur Playlist hinzufügen")
+        add_playlist_button.connect("clicked", self.on_add_to_playlist)
+        playlist_button_box.append(add_playlist_button)
+
+        import_playlist_button = Gtk.Button()
+        import_playlist_button.set_icon_name("document-open-symbolic")
+        import_playlist_button.set_tooltip_text("Playlist importieren (.m3u, .pls)")
+        import_playlist_button.connect("clicked", self.on_import_playlist)
+        playlist_button_box.append(import_playlist_button)
+
+        save_playlist_button = Gtk.Button()
+        save_playlist_button.set_icon_name("document-save-symbolic")
+        save_playlist_button.set_tooltip_text("Playlist speichern")
+        save_playlist_button.connect("clicked", self.on_save_playlist)
+        playlist_button_box.append(save_playlist_button)
+
+        shuffle_playlist_button = Gtk.Button()
+        shuffle_playlist_button.set_icon_name("media-playlist-shuffle-symbolic")
+        shuffle_playlist_button.set_tooltip_text("Playlist mischen")
+        shuffle_playlist_button.connect("clicked", self.on_shuffle_playlist)
+        playlist_button_box.append(shuffle_playlist_button)
+
+        clear_playlist_button = Gtk.Button()
+        clear_playlist_button.set_icon_name("user-trash-symbolic")
+        clear_playlist_button.set_tooltip_text("Playlist leeren")
+        clear_playlist_button.connect("clicked", self.on_clear_playlist)
+        playlist_button_box.append(clear_playlist_button)
+
+        playlist_section.append(playlist_button_box)
+
+        # Scrollbarer Bereich für Playlist
+        playlist_scrolled = Gtk.ScrolledWindow()
+        playlist_scrolled.set_min_content_height(200)
+        playlist_scrolled.set_vexpand(True)
+        playlist_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self.playlist_listbox = Gtk.ListBox()
+        self.playlist_listbox.add_css_class("boxed-list")
+        self.playlist_listbox.connect("row-activated", self.on_playlist_item_selected)
+
+        playlist_scrolled.set_child(self.playlist_listbox)
+        playlist_section.append(playlist_scrolled)
+
+        self.sidebar.append(playlist_section)
+
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self.sidebar.append(separator)
+
+        # === CHROMECAST SECTION ===
+        chromecast_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        # Chromecast Überschrift
         label = Gtk.Label(label="Chromecast-Geräte")
-        label.add_css_class("title-2")
-        self.sidebar.append(label)
+        label.add_css_class("title-3")
+        chromecast_section.append(label)
 
         # Scrollbarer Bereich für Geräte
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
+        scrolled.set_min_content_height(150)
+        scrolled.set_vexpand(False)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self.device_list = Gtk.ListBox()
@@ -1021,12 +1738,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.device_list.connect("row-activated", self.on_device_selected)
 
         scrolled.set_child(self.device_list)
-        self.sidebar.append(scrolled)
+        chromecast_section.append(scrolled)
 
         # Status Label
         self.status_label = Gtk.Label(label="Keine Geräte gefunden")
         self.status_label.add_css_class("dim-label")
-        self.sidebar.append(self.status_label)
+        chromecast_section.append(self.status_label)
+
+        self.sidebar.append(chromecast_section)
 
     def setup_timeline(self):
         """Erstellt Timeline mit Zeit-Labels"""
@@ -1051,7 +1770,6 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Korrekte Event-Handler für Seeking
         # 'change-value' wird ausgelöst, wenn der Benutzer den Slider bewegt
-        # Das 'format-value' Signal wird entfernt, da es erst ab GTK 4.2 verfügbar ist.
         self.timeline_scale.connect("change-value", self.on_timeline_seek)
 
         timeline_box.append(self.timeline_scale)
@@ -1164,6 +1882,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.control_box.set_margin_end(12)
         self.control_box.set_margin_bottom(12)
 
+        # Previous Button
+        self.previous_button = Gtk.Button()
+        self.previous_button.set_icon_name("media-skip-backward-symbolic")
+        self.previous_button.set_tooltip_text("Vorheriges Video")
+        self.previous_button.connect("clicked", self.on_previous_video)
+        self.previous_button.set_sensitive(False)
+        self.control_box.append(self.previous_button)
+
         # Play Button
         self.play_button = Gtk.Button()
         self.play_button.set_icon_name("media-playback-start-symbolic")
@@ -1181,6 +1907,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         stop_button.set_icon_name("media-playback-stop-symbolic")
         stop_button.connect("clicked", self.on_stop)
         self.control_box.append(stop_button)
+
+        # Next Button
+        self.next_button = Gtk.Button()
+        self.next_button.set_icon_name("media-skip-forward-symbolic")
+        self.next_button.set_tooltip_text("Nächstes Video")
+        self.next_button.connect("clicked", self.on_next_video)
+        self.next_button.set_sensitive(False)
+        self.control_box.append(self.next_button)
 
         # Lautstärke-Kontrolle
         volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1210,11 +1944,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         mode_box.append(mode_label)
 
         self.mode_switch = Gtk.Switch()
-        self.mode_switch.set_active(False)
+        self.mode_switch.set_active(self.play_mode == "chromecast")
         self.mode_switch.connect("notify::active", self.on_mode_changed)
         mode_box.append(self.mode_switch)
 
-        self.mode_label = Gtk.Label(label="Lokal")
+        self.mode_label = Gtk.Label(label="Lokal" if self.play_mode == "local" else "Chromecast")
         mode_box.append(self.mode_label)
 
         self.control_box.append(mode_box)
@@ -1232,6 +1966,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         filters.append(filter_video)
         dialog.set_filters(filters)
 
+        # Letztes Verzeichnis aus Config verwenden
+        last_dir = self.config.get_setting("last_directory")
+        if last_dir and Path(last_dir).exists():
+            dialog.set_initial_folder(Gio.File.new_for_path(last_dir))
+
         dialog.open(self, None, self.on_file_selected)
 
     def on_file_selected(self, dialog, result):
@@ -1241,7 +1980,29 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if file:
                 filepath = file.get_path()
                 self.current_video_path = filepath
+
+                # Speichere Verzeichnis in Config
+                self.config.set_setting("last_directory", str(Path(filepath).parent))
+
+                # Füge zur Playlist hinzu und setze als aktuell
+                if filepath not in self.playlist_manager.playlist:
+                    self.playlist_manager.add_video(filepath)
+                    self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - 1)
+                else:
+                    # Setze existierendes Video als aktuell
+                    index = self.playlist_manager.playlist.index(filepath)
+                    self.playlist_manager.set_current_index(index)
+
+                self.update_playlist_ui()
+
+                # Lade Video
                 self.video_player.load_video(filepath)
+
+                # Info-Overlay vorbereiten
+                self.info_label.set_opacity(0.0)
+
+                # Untertitel-Menü zurücksetzen
+                self.subtitle_button.set_sensitive(False)
 
                 # Timeline aktivieren nach kurzem Delay
                 def enable_timeline():
@@ -1312,7 +2073,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Callback nach Verbindung"""
         if success:
             self.status_label.set_text(f"Verbunden: {device_name}")
-            self.mode_switch.set_active(True)
+            # Speichere Gerät in Config
+            self.config.set_setting("chromecast_device", device_name)
         else:
             self.status_label.set_text(f"Verbindung fehlgeschlagen")
         return False
@@ -1322,6 +2084,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if switch.get_active():
             # Wechsel zu Chromecast-Modus
             self.play_mode = "chromecast"
+            self.config.set_setting("play_mode", "chromecast")
             self.mode_label.set_text("Chromecast")
 
             # Stoppe lokale Wiedergabe falls aktiv
@@ -1335,6 +2098,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 current_volume = self.volume_scale.get_value() / 100.0
                 def sync_volume():
                     self.cast_manager.set_volume(current_volume)
+
                 thread = threading.Thread(target=sync_volume, daemon=True)
                 thread.start()
 
@@ -1343,9 +2107,6 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if self.current_video_path and self.cast_manager.selected_cast:
                 self.status_label.set_text("Chromecast-Modus: Bereit")
                 print("Chromecast-Modus aktiv. Drücke Play, um das Streaming zu starten.")
-                # Das eigentliche Streaming wird jetzt durch on_play() ausgelöst,
-                # nicht mehr automatisch beim Moduswechsel.
-                # Dies verhindert Race Conditions und Logikfehler.
             elif self.current_video_path and not self.cast_manager.selected_cast:
                 self.status_label.set_text("Chromecast-Modus - Kein Gerät verbunden")
             else:
@@ -1353,6 +2114,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         else:
             # Wechsel zu Lokal-Modus
             self.play_mode = "local"
+            self.config.set_setting("play_mode", "local")
             self.mode_label.set_text("Lokal")
 
             # Synchronisiere Lautstärke zum lokalen Player
@@ -1426,6 +2188,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if self.play_mode == "local":
             self.video_player.play()
             self.start_timeline_updates()
+            self.play_button.set_icon_name("media-playback-pause-symbolic")
+            self.play_button.disconnect_by_func(self.on_play)
+            self.play_button.connect("clicked", self.on_pause)
         else:
             # Chromecast-Modus - Prüfe den Zustand
             mc = self.cast_manager.mc
@@ -1433,20 +2198,24 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # um zu wissen, ob ein Video geladen ist (auch wenn es pausiert oder IDLE ist).
             is_media_loaded = mc and mc.status and mc.status.media_session_id is not None
 
-
             if is_media_loaded:
                 # Video ist bereits geladen, nur fortsetzen
                 print("Fortsetze Chromecast-Wiedergabe...")
                 self.cast_manager.play()
                 self.start_timeline_updates()
                 self.inhibit_suspend()
+                self.play_button.set_icon_name("media-playback-pause-symbolic")
+                self.play_button.disconnect_by_func(self.on_play)
+                self.play_button.connect("clicked", self.on_pause)
             elif self.current_video_path and self.cast_manager.selected_cast:
                 # Verhindere Standby während Streaming
                 # Starte HTTP-Server und streame zu Chromecast
                 self.status_label.set_text("Starte Streaming...")
+                self.loading_spinner.start()
+                self.loading_spinner.set_visible(True)
+                self.play_button.set_sensitive(False)
 
                 def start_streaming():
-                    GLib.idle_add(self.inhibit_suspend)
                     try:
                         video_path = self.current_video_path
 
@@ -1482,20 +2251,44 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                             success = self.cast_manager.play_video(video_path, video_url)
 
                             if success:
-                                GLib.idle_add(self.status_label.set_text, "Streaming läuft...")
-                                GLib.idle_add(self.start_timeline_updates)
+                                GLib.idle_add(lambda: (
+                                    self.status_label.set_text("Streaming läuft..."),
+                                    self.start_timeline_updates(),
+                                    self.inhibit_suspend(),
+                                    self.loading_spinner.stop(),
+                                    self.loading_spinner.set_visible(False),
+                                    self.play_button.set_sensitive(True),
+                                    self.play_button.set_icon_name("media-playback-pause-symbolic"),
+                                    self.play_button.disconnect_by_func(self.on_play),
+                                    self.play_button.connect("clicked", self.on_pause)
+                                ))
                             else:
-                                GLib.idle_add(self.status_label.set_text, "Streaming fehlgeschlagen")
-                                GLib.idle_add(self.uninhibit_suspend)
+                                GLib.idle_add(lambda: (
+                                    self.status_label.set_text("Streaming fehlgeschlagen"),
+                                    self.uninhibit_suspend(),
+                                    self.loading_spinner.stop(),
+                                    self.loading_spinner.set_visible(False),
+                                    self.play_button.set_sensitive(True)
+                                ))
                         else:
-                            GLib.idle_add(self.status_label.set_text, "HTTP-Server-Fehler")
-                            GLib.idle_add(self.uninhibit_suspend)
+                            GLib.idle_add(lambda: (
+                                self.status_label.set_text("HTTP-Server-Fehler"),
+                                self.uninhibit_suspend(),
+                                self.loading_spinner.stop(),
+                                self.loading_spinner.set_visible(False),
+                                self.play_button.set_sensitive(True)
+                            ))
                     except Exception as e:
                         print(f"Streaming-Fehler: {e}")
                         import traceback
                         traceback.print_exc()
-                        GLib.idle_add(self.status_label.set_text, f"Fehler: {str(e)}")
-                        GLib.idle_add(self.uninhibit_suspend)
+                        GLib.idle_add(lambda: (
+                            self.status_label.set_text(f"Fehler: {str(e)}"),
+                            self.uninhibit_suspend(),
+                            self.loading_spinner.stop(),
+                            self.loading_spinner.set_visible(False),
+                            self.play_button.set_sensitive(True)
+                        ))
 
                 thread = threading.Thread(target=start_streaming, daemon=True)
                 thread.start()
@@ -1504,10 +2297,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Pausiert die Wiedergabe"""
         if self.play_mode == "local":
             self.video_player.pause()
+            self.play_button.set_icon_name("media-playback-start-symbolic")
+            self.play_button.disconnect_by_func(self.on_pause)
+            self.play_button.connect("clicked", self.on_play)
         else:
             self.cast_manager.pause()
             # Bei Pause Standby wieder erlauben
             self.uninhibit_suspend()
+            self.play_button.set_icon_name("media-playback-start-symbolic")
+            self.play_button.disconnect_by_func(self.on_pause)
+            self.play_button.connect("clicked", self.on_play)
 
     def on_stop(self, button):
         """Stoppt die Wiedergabe"""
@@ -1523,71 +2322,579 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.stop_timeline_updates()
         self.timeline_scale.set_value(0)
         self.time_label.set_text("00:00")
+        
+        # Play-Button zurücksetzen
+        self.play_button.set_icon_name("media-playback-start-symbolic")
+        self.play_button.disconnect_by_func(self.on_pause)
+        self.play_button.connect("clicked", self.on_play)
 
     def on_volume_changed(self, scale):
         """Wird aufgerufen, wenn der Lautstärke-Slider bewegt wird"""
         volume_percent = scale.get_value()
         volume = volume_percent / 100.0  # Konvertiere 0-100 zu 0.0-1.0
 
+        # Speichere Lautstärke in Config
+        self.config.set_setting("volume", volume)
+
+        # Wenn manuell lauter gestellt wird, ist es nicht mehr stummgeschaltet
+        if volume > 0:
+            self.is_muted = False
+
+        self._set_current_volume(volume)
+
+    def _set_current_volume(self, volume):
+        """Interne Hilfsfunktion zum Setzen der Lautstärke im aktuellen Modus."""
         if self.play_mode == "local":
             self.video_player.set_volume(volume)
-        else:
+        elif self.cast_manager.selected_cast:
             # Chromecast-Lautstärke in Thread setzen um UI nicht zu blockieren
-            if self.cast_manager.selected_cast:
-                def set_chromecast_volume():
-                    self.cast_manager.set_volume(volume)
+            def set_chromecast_volume():
+                self.cast_manager.set_volume(volume)
 
-                thread = threading.Thread(target=set_chromecast_volume, daemon=True)
+            thread = threading.Thread(target=set_chromecast_volume, daemon=True)
+            thread.start()
+
+    def on_add_to_playlist(self, button):
+        """Öffnet Dialog zum Hinzufügen von Videos zur Playlist"""
+        dialog = Gtk.FileDialog()
+
+        # Filter für Video-Dateien
+        filter_video = Gtk.FileFilter()
+        filter_video.set_name("Video-Dateien")
+        filter_video.add_mime_type("video/*")
+
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_video)
+        dialog.set_filters(filters)
+
+        # Letztes Verzeichnis aus Config verwenden
+        last_dir = self.config.get_setting("last_directory")
+        if last_dir and Path(last_dir).exists():
+            dialog.set_initial_folder(Gio.File.new_for_path(last_dir))
+
+        dialog.open_multiple(self, None, self.on_playlist_files_selected)
+
+    def on_playlist_files_selected(self, dialog, result):
+        """Callback wenn Dateien für Playlist ausgewählt wurden"""
+        try:
+            files = dialog.open_multiple_finish(result)
+            if files:
+                for i in range(files.get_n_items()):
+                    file = files.get_item(i)
+                    filepath = file.get_path()
+                    self.playlist_manager.add_video(filepath)
+
+                    # Speichere Verzeichnis in Config
+                    self.config.set_setting("last_directory", str(Path(filepath).parent))
+
+                self.update_playlist_ui()
+        except Exception as e:
+            print(f"Fehler beim Hinzufügen zur Playlist: {e}")
+
+    def on_import_playlist(self, button):
+        """Öffnet Dialog zum Importieren einer Playlist-Datei."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Playlist importieren")
+
+        # Filter für Playlist-Dateien
+        filter_pls = Gtk.FileFilter()
+        filter_pls.set_name("PLS Playlist (*.pls)")
+        filter_pls.add_pattern("*.pls")
+
+        filter_m3u = Gtk.FileFilter()
+        filter_m3u.set_name("M3U Playlist (*.m3u, *.m3u8)")
+        filter_m3u.add_pattern("*.m3u")
+        filter_m3u.add_pattern("*.m3u8")
+
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(filter_m3u)
+        filters.append(filter_pls)
+        dialog.set_filters(filters)
+
+        # Letztes Verzeichnis aus Config verwenden
+        last_dir = self.config.get_setting("last_directory")
+        if last_dir and Path(last_dir).exists():
+            dialog.set_initial_folder(Gio.File.new_for_path(last_dir))
+
+        dialog.open(self, None, self.on_playlist_file_imported)
+
+    def on_playlist_file_imported(self, dialog, result):
+        """Callback, wenn eine Playlist-Datei ausgewählt wurde."""
+        try:
+            file = dialog.open_finish(result)
+            if not file:
+                return
+
+            playlist_path = file.get_path()
+            playlist_dir = Path(playlist_path).parent
+            print(f"Importiere Playlist: {playlist_path}")
+
+            # Speichere Verzeichnis in Config
+            self.config.set_setting("last_directory", str(playlist_dir))
+
+            video_paths = []
+            with open(playlist_path, 'r', encoding='utf-8', errors='ignore') as f:
+                if playlist_path.lower().endswith(('.m3u', '.m3u8')):
+                    # M3U/M3U8 Parsing
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            video_paths.append(line)
+                elif playlist_path.lower().endswith('.pls'):
+                    # PLS Parsing (einfach)
+                    for line in f:
+                        line = line.strip()
+                        if line.lower().startswith('file'):
+                            parts = line.split('=', 1)
+                            if len(parts) == 2:
+                                video_paths.append(parts[1])
+
+            # Füge Videos zur Playlist hinzu
+            added_count = 0
+            for path in video_paths:
+                # Mache Pfade absolut, falls sie relativ sind
+                video_file = Path(path)
+                if not video_file.is_absolute():
+                    video_file = playlist_dir / video_file
+                
+                if video_file.exists() and self.playlist_manager.add_video(str(video_file)):
+                    added_count += 1
+            
+            self.update_playlist_ui()
+            self.status_label.set_text(f"{added_count} Video(s) aus Playlist importiert.")
+        except Exception as e:
+            print(f"Fehler beim Importieren der Playlist: {e}")
+
+    def on_save_playlist(self, button):
+        """Speichert die aktuelle Playlist."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Playlist speichern")
+        
+        # Setze Standard-Dateinamen
+        dialog.set_initial_name("meine_playlist.m3u")
+        
+        # Letztes Verzeichnis aus Config verwenden
+        last_dir = self.config.get_setting("last_directory")
+        if last_dir and Path(last_dir).exists():
+            dialog.set_initial_folder(Gio.File.new_for_path(last_dir))
+        
+        dialog.save(self, None, self.on_playlist_save_selected)
+
+    def on_playlist_save_selected(self, dialog, result):
+        """Callback, wenn ein Speicherort für die Playlist ausgewählt wurde."""
+        try:
+            file = dialog.save_finish(result)
+            if not file:
+                return
+            
+            save_path = file.get_path()
+            if self.playlist_manager.save_playlist(save_path):
+                self.status_label.set_text(f"Playlist gespeichert: {Path(save_path).name}")
+                # Speichere Verzeichnis in Config
+                self.config.set_setting("last_directory", str(Path(save_path).parent))
+        except Exception as e:
+            print(f"Fehler beim Speichern der Playlist: {e}")
+
+    def on_shuffle_playlist(self, button):
+        """Mischt die Playlist."""
+        self.playlist_manager.shuffle_playlist()
+        self.update_playlist_ui()
+        self.status_label.set_text("Playlist gemischt")
+
+    def update_playlist_ui(self):
+        """Aktualisiert die Playlist-UI"""
+        # Leere aktuelle Liste
+        while True:
+            row = self.playlist_listbox.get_row_at_index(0)
+            if row is None:
+                break
+            self.playlist_listbox.remove(row)
+
+        # Füge alle Playlist-Einträge hinzu
+        for index, video_path in enumerate(self.playlist_manager.playlist):
+            row = Gtk.ListBoxRow()
+
+            # Box für Eintrag
+            entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            entry_box.set_margin_start(6)
+            entry_box.set_margin_end(6)
+            entry_box.set_margin_top(4)
+            entry_box.set_margin_bottom(4)
+
+            # Icon für aktuelles Video
+            if index == self.playlist_manager.current_index:
+                icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+                entry_box.append(icon)
+
+            # Video-Name
+            label = Gtk.Label(label=Path(video_path).name)
+            label.set_xalign(0)
+            label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+            label.set_hexpand(True)
+            entry_box.append(label)
+
+            # Entfernen-Button
+            remove_button = Gtk.Button()
+            remove_button.set_icon_name("edit-delete-symbolic")
+            remove_button.set_has_frame(False)
+            remove_button.connect("clicked", self.on_remove_from_playlist, index)
+            entry_box.append(remove_button)
+
+            row.set_child(entry_box)
+            row.video_index = index
+            self.playlist_listbox.append(row)
+
+        # Aktualisiere Zähler
+        count = self.playlist_manager.get_playlist_length()
+        self.playlist_count_label.set_text(f"({count})")
+
+        # Aktualisiere Button-Status
+        self.update_playlist_button_states()
+
+    def update_playlist_button_states(self):
+        """Aktualisiert den Zustand der Previous/Next Buttons"""
+        self.previous_button.set_sensitive(self.playlist_manager.has_previous())
+        self.next_button.set_sensitive(self.playlist_manager.has_next())
+
+    def on_remove_from_playlist(self, button, index):
+        """Entfernt ein Video aus der Playlist"""
+        self.playlist_manager.remove_video(index)
+        self.update_playlist_ui()
+
+    def on_clear_playlist(self, button):
+        """Leert die gesamte Playlist"""
+        self.playlist_manager.clear_playlist()
+        self.update_playlist_ui()
+
+    def on_playlist_item_selected(self, listbox, row):
+        """Wird aufgerufen, wenn ein Playlist-Eintrag ausgewählt wird"""
+        if row:
+            index = row.video_index
+            self.playlist_manager.set_current_index(index)
+            video_path = self.playlist_manager.get_current_video()
+            if video_path:
+                self.load_and_play_video(video_path)
+
+    def on_next_video(self, button):
+        """Springt zum nächsten Video in der Playlist"""
+        next_video = self.playlist_manager.next_video()
+        if next_video:
+            self.load_and_play_video(next_video)
+            self.update_playlist_ui()
+
+    def on_previous_video(self, button):
+        """Springt zum vorherigen Video in der Playlist"""
+        previous_video = self.playlist_manager.previous_video()
+        if previous_video:
+            self.load_and_play_video(previous_video)
+            self.update_playlist_ui()
+
+    def load_and_play_video(self, filepath):
+        """Lädt und spielt ein Video ab"""
+        self.current_video_path = filepath
+        filename = Path(filepath).name
+
+        if self.play_mode == "local":
+            self.video_player.load_video(filepath)
+            self.video_player.play()
+            self.start_timeline_updates()
+            # Info-Overlay vorbereiten
+            self.info_label.set_opacity(0.0)
+            # Untertitel-Menü zurücksetzen
+            self.subtitle_button.set_sensitive(False)
+            
+            # Play-Button aktualisieren
+            self.play_button.set_icon_name("media-playback-pause-symbolic")
+            self.play_button.disconnect_by_func(self.on_play)
+            self.play_button.connect("clicked", self.on_pause)
+
+            self.status_label.set_text(f"Spielt: {filename}")
+
+            # Timeline aktivieren nach kurzem Delay
+            def enable_timeline():
+                duration = self.video_player.get_duration()
+                if duration > 0:
+                    self.timeline_scale.set_sensitive(True)
+                    self.duration_label.set_text(self.format_time(duration))
+                    self.time_label.set_text("00:00")
+                    self.timeline_scale.set_value(0)
+                return False
+
+            GLib.timeout_add(500, enable_timeline)
+        else:
+            # Chromecast-Modus
+            if self.cast_manager.selected_cast:
+                self.status_label.set_text(f"Streame: {filename}")
+                self.loading_spinner.start()
+                self.loading_spinner.set_visible(True)
+                self.play_button.set_sensitive(False)
+                
+                # Starte Streaming in Thread
+                def start_streaming():
+                    video_path = filepath
+
+                    # Konvertierung falls nötig
+                    if video_path.lower().endswith(('.mkv', '.avi')):
+                        GLib.idle_add(self.status_label.set_text, "Konvertiere Video...")
+                        converted_path = self.video_converter.convert_to_mp4(video_path)
+                        if converted_path:
+                            video_path = converted_path
+
+                    video_url = self.http_server.get_video_url(video_path)
+                    if video_url:
+                        success = self.cast_manager.play_video(video_path, video_url)
+                        if success:
+                            GLib.idle_add(lambda: (
+                                self.status_label.set_text(f"Streamt: {filename}"),
+                                self.start_timeline_updates(),
+                                self.inhibit_suspend(),
+                                self.loading_spinner.stop(),
+                                self.loading_spinner.set_visible(False),
+                                self.play_button.set_sensitive(True),
+                                self.play_button.set_icon_name("media-playback-pause-symbolic"),
+                                self.play_button.disconnect_by_func(self.on_play),
+                                self.play_button.connect("clicked", self.on_pause)
+                            ))
+                        else:
+                            GLib.idle_add(lambda: (
+                                self.status_label.set_text("Streaming fehlgeschlagen"),
+                                self.loading_spinner.stop(),
+                                self.loading_spinner.set_visible(False),
+                                self.play_button.set_sensitive(True)
+                            ))
+                    else:
+                        GLib.idle_add(lambda: (
+                            self.status_label.set_text("HTTP-Server-Fehler"),
+                            self.loading_spinner.stop(),
+                            self.loading_spinner.set_visible(False),
+                            self.play_button.set_sensitive(True)
+                        ))
+
+                thread = threading.Thread(target=start_streaming, daemon=True)
                 thread.start()
-            else:
-                print("⚠ Lautstärke kann nicht gesetzt werden: Kein Chromecast verbunden")
+
+    def on_key_pressed(self, controller, keyval, keycode, state):
+        """Behandelt Tastendrücke auf dem Hauptfenster."""
+        shortcuts = self.config.get_setting("keyboard_shortcuts", {})
+        
+        # Mapping von Key-Namen zu Gdk.KEY_* Konstanten
+        key_map = {
+            "space": Gdk.KEY_space,
+            "F11": Gdk.KEY_F11,
+            "f": Gdk.KEY_f,
+            "F": Gdk.KEY_F,
+            "Up": Gdk.KEY_Up,
+            "Down": Gdk.KEY_Down,
+            "Right": Gdk.KEY_Right,
+            "Left": Gdk.KEY_Left,
+            "m": Gdk.KEY_m,
+            "M": Gdk.KEY_M,
+            "n": Gdk.KEY_n,
+            "N": Gdk.KEY_N,
+            "p": Gdk.KEY_p,
+            "P": Gdk.KEY_P
+        }
+        
+        # Prüfe alle Shortcuts
+        if keyval == key_map.get(shortcuts.get("fullscreen", "F11"), Gdk.KEY_F11):
+            self.on_toggle_fullscreen(None)
+            return True
+        elif keyval == key_map.get(shortcuts.get("play_pause", "space"), Gdk.KEY_space):
+            self.toggle_play_pause()
+            return True
+        elif keyval == key_map.get(shortcuts.get("seek_forward", "Right"), Gdk.KEY_Right):
+            self.seek_relative(5)  # 5 Sekunden vorspulen
+            return True
+        elif keyval == key_map.get(shortcuts.get("seek_backward", "Left"), Gdk.KEY_Left):
+            self.seek_relative(-5)  # 5 Sekunden zurückspulen
+            return True
+        elif keyval == key_map.get(shortcuts.get("volume_up", "Up"), Gdk.KEY_Up):
+            self.change_volume_relative(0.05)  # Lautstärke +5%
+            return True
+        elif keyval == key_map.get(shortcuts.get("volume_down", "Down"), Gdk.KEY_Down):
+            self.change_volume_relative(-0.05)  # Lautstärke -5%
+            return True
+        elif keyval == key_map.get(shortcuts.get("mute", "m"), Gdk.KEY_m):
+            self.toggle_mute()
+            return True
+        elif keyval == key_map.get(shortcuts.get("next_video", "n"), Gdk.KEY_n):
+            self.on_next_video(None)
+            return True
+        elif keyval == key_map.get(shortcuts.get("previous_video", "p"), Gdk.KEY_p):
+            self.on_previous_video(None)
+            return True
+        return False
+
+    def seek_relative(self, seconds):
+        """Spult relativ zur aktuellen Position."""
+        current_pos = self.get_current_position()
+        duration = self.get_current_duration()
+        if duration > 0:
+            new_pos = max(0, min(duration, current_pos + seconds))
+            self.perform_seek(new_pos)
+
+    def toggle_play_pause(self):
+        """Wechselt zwischen Wiedergabe und Pause."""
+        is_playing = False
+        if self.play_mode == "local":
+            state = self.video_player.playbin.get_state(0).state
+            is_playing = (state == Gst.State.PLAYING)
+        elif self.cast_manager.mc and self.cast_manager.mc.status:
+            is_playing = (self.cast_manager.mc.status.player_state == "PLAYING")
+
+        if is_playing:
+            self.on_pause(None)
+        else:
+            self.on_play(None)
+
+    def change_volume_relative(self, delta):
+        """Ändert die Lautstärke relativ zum aktuellen Wert."""
+        current_volume_percent = self.volume_scale.get_value()
+        new_volume_percent = current_volume_percent + (delta * 100)
+        new_volume_percent = max(0, min(100, new_volume_percent)) # Begrenze auf 0-100
+        self.volume_scale.set_value(new_volume_percent)
+
+    def toggle_mute(self):
+        """Schaltet den Ton stumm oder wieder an."""
+        if self.is_muted:
+            # Ton wieder an
+            self.volume_scale.set_value(self.last_volume * 100)
+            self.is_muted = False
+        else:
+            # Stummschalten
+            self.last_volume = self.volume_scale.get_value() / 100.0
+            if self.last_volume > 0: # Nur stummschalten, wenn nicht schon auf 0
+                self.volume_scale.set_value(0)
+                self.is_muted = True
+
+    def on_toggle_fullscreen(self, button):
+        """Schaltet den Vollbild-Modus um."""
+        is_currently_fullscreen = self.is_fullscreen()
+        self._toggle_ui_for_fullscreen(not is_currently_fullscreen)
+
+        if self.is_fullscreen():
+            self.unfullscreen()
+        else:
+            self.fullscreen()
+
+    def _toggle_ui_for_fullscreen(self, fullscreen_active):
+        """Zeigt/versteckt UI-Elemente für den Vollbildmodus."""
+        self.main_box.get_first_child().set_visible(not fullscreen_active) # HeaderBar
+        self.sidebar.set_visible(not fullscreen_active)
+        self.timeline_widget.set_visible(not fullscreen_active)
+        self.control_box.set_visible(not fullscreen_active)
+
+    def show_video_info(self, video_info):
+        """Zeigt das Info-Overlay für einige Sekunden an."""
+        info_text = (
+            f"<b>Auflösung:</b> {video_info['resolution']}\n"
+            f"<b>Codec:</b> {video_info['codec']}\n"
+            f"<b>Bitrate:</b> {video_info['bitrate']}"
+        )
+        self.info_label.set_markup(info_text)
+
+        # Starte den Timer zum Ausblenden nur, wenn das Overlay noch nicht sichtbar ist.
+        # Dies verhindert, dass der Timer bei jeder kleinen Info-Aktualisierung neu startet.
+        if self.info_label.get_opacity() < 1.0:
+            self.info_label.set_opacity(1.0)
+            def hide_overlay():
+                self.info_label.set_opacity(0.0)
+                return False # Nur einmal ausführen
+            GLib.timeout_add_seconds(5, hide_overlay)
+
+        return False # Verhindert, dass der Callback erneut aufgerufen wird
+
+    def update_subtitle_menu(self):
+        """Aktualisiert das Untertitel-Menü basierend auf verfügbaren Spuren."""
+        print("Suche nach Untertitel-Spuren...")
+        tracks = self.video_player.get_subtitle_tracks()
+
+        if not tracks:
+            print("Keine Untertitel gefunden.")
+            self.subtitle_button.set_sensitive(False)
+            return False
+
+        print(f"{len(tracks)} Untertitel-Spur(en) gefunden.")
+        
+        # Erstelle ein neues Menü-Modell
+        menu_model = Gio.Menu()
+
+        # Eintrag zum Deaktivieren
+        menu_model.append("Deaktivieren", "win.set_subtitle(-1)")
+
+        # Einträge für jede Spur
+        for track in tracks:
+            menu_model.append(track["description"], f"win.set_subtitle({track['index']})")
+
+        self.subtitle_popover.set_menu_model(menu_model)
+        self.subtitle_button.set_sensitive(True)
+        return False # Nur einmal ausführen
+
+    def on_set_subtitle(self, action, param):
+        """Wird aufgerufen, wenn ein Untertitel aus dem Menü ausgewählt wird."""
+        index = param.get_int32()
+        self.video_player.set_subtitle_track(index)
+        print(f"Untertitel-Spur auf {index} gesetzt.")
 
     def on_show_about(self, button):
         """Zeigt About-Dialog"""
         about = Adw.AboutWindow(
             transient_for=self,
             application_name="Video Chromecast Player",
-            application_icon="com.videocast.player", # Stellen Sie sicher, dass dieses Icon existiert
+            application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="1.2.0",
+            version="1.4.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
             website="https://github.com/berlinux2016/gnome-chromecast-player",
             issue_url="https://github.com/berlinux2016/gnome-chromecast-player/issues",
-            # Beschreibung des Programms
             comments="Ein moderner GTK4-Videoplayer mit Chromecast-Unterstützung, der für eine nahtlose Wiedergabe sowohl lokal als auch auf Chromecast-Geräten optimiert ist. Inklusive Hardware-Beschleunigung für AMD und NVIDIA GPUs.\n\nMit Liebe für Simone programmiert ❤️",
-            # Dieser Text erscheint prominent unter der Versionsnummer
-            debug_info=None
+            release_notes="""<p>Version 1.4.0 (2025-12-25)</p>
+<ul>
+  <li>Abspiellisten-Import - M3U und PLS Format-Support</li>
+  <li>Tastatur-Shortcuts - Steuerung per Leertaste, Pfeiltasten, etc.</li>
+</ul>
+<p>Version 1.3.0 (2025-12-20)</p>
+<ul>
+  <li>Vollbild-Modus - F11 für Vollbild-Wiedergabe</li>
+  <li>Drag &amp; Drop - Videos direkt ins Fenster ziehen</li>
+  <li>Video-Info-Overlay - Zeigt Codec, Auflösung und Bitrate an</li>
+  <li>Untertitel-Support - Automatische Erkennung von SRT, ASS, VTT Dateien</li>
+</ul>
+<p>Version 1.2.0 (2025-12-15)</p>
+<ul>
+  <li>Hardware-Beschleunigung - AMD VA-API und NVIDIA NVDEC Unterstützung</li>
+  <li>Automatische Konvertierung - MKV/AVI zu MP4 für Chromecast</li>
+  <li>Playlist-Management - Mit Shuffle und Duplikat-Entfernung</li>
+</ul>
+<p>Version 1.1.0 (2025-12-10)</p>
+<ul>
+  <li>Chromecast-Unterstützung - Streaming zu Google Chromecast Geräten</li>
+  <li>Lokale Wiedergabe - GTK4/GStreamer basierter Player</li>
+  <li>Duale Modi - Lokal und Chromecast mit nahtlosem Wechsel</li>
+</ul>
+<p>Version 1.0.0 (2025-12-01)</p>
+<ul>
+  <li>Erstveröffentlichung</li>
+  <li>GTK4 Oberfläche mit Adwaita Design</li>
+  <li>Grundlegende Video-Wiedergabefunktionen</li>
+</ul>"""
         )
 
-        # "Was ist neu?" Sektion (wird im "Credits"-Tab angezeigt)
-        about.add_credit_section(
-            "Was ist neu in Version 1.2.0?",
-            [
-                "Timeline/Seek-Funktion für lokale Wiedergabe und Chromecast-Streaming",
-                "Hardware-Beschleunigung für NVIDIA (NVDEC/NVENC)",
-                "Verbesserte Kompatibilität mit Xiaomi TVs",
-                "Optimierte und schnellere Chromecast-Gerätesuche",
-                "Stabilerer Modus-Wechsel zwischen Lokal und Chromecast",
-            ]
-        )
-
-        about.add_credit_section(
-            "Features in Version 1.0.0",
-            [
-                "Grundlegende Chromecast-Unterstützung",
-                "Hardware-Beschleunigung für AMD (VA-API)",
-                "Automatische Konvertierung von MKV/AVI zu MP4",
-                "Moderne Benutzeroberfläche mit GTK4/Libadwaita",
-            ]
-        )
-
-        about.present()
+        about.present()      
 
     def on_close_request(self, window):
         """Cleanup beim Schließen der Anwendung"""
         print("Beende Anwendung, räume auf...")
+
+        # Speichere Fenstergröße
+        width, height = self.get_default_size()
+        self.config.set_setting("window_width", width)
+        self.config.set_setting("window_height", height)
+
+        # Speichere aktuelle Lautstärke
+        self.config.set_setting("volume", self.volume_scale.get_value() / 100.0)
 
         # Erlaube wieder Standby
         try:
@@ -1629,9 +2936,19 @@ class VideoPlayerApp(Adw.Application):
         super().__init__(application_id='com.videocast.player')
         self.connect('activate', self.on_activate)
 
+        # Aktionen für das Menü (z.B. Untertitel)
+        action = Gio.SimpleAction.new_stateful("set_subtitle", GLib.VariantType.new('i'), GLib.Variant('i', -1))
+        action.connect("activate", self.on_app_set_subtitle)
+        self.add_action(action)
+
     def on_activate(self, app):
         self.win = VideoPlayerWindow(application=app)
         self.win.present()
+
+    def on_app_set_subtitle(self, action, param):
+        """Leitet die Untertitel-Aktion an das Fenster weiter."""
+        if self.win:
+            self.win.on_set_subtitle(action, param)
 
 
 def main():

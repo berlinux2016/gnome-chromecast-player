@@ -34,10 +34,16 @@
 
 ### 🎨 Moderne Benutzeroberfläche
 - **GTK4/Libadwaita** UI im GNOME-Stil
+- **Playlist-Unterstützung** - Mehrere Videos in Warteschlange mit Auto-Advance
+- **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
+- **Drag & Drop** - Videos direkt ins Fenster ziehen
 - **Timeline/Seek-Funktion** mit Echtzeit-Positionsanzeige
-- **Drag & Drop** zum Vor- und Zurückspulen
-- **Dual-Mode**: Lokale Wiedergabe oder Chromecast-Streaming
-- **Intuitive Steuerung**: Play, Pause, Stop, Seek
+- **Lautstärkeregelung** mit Slider für lokale und Chromecast-Wiedergabe
+- **Video-Info-Overlay** - Zeigt Codec, Auflösung und Bitrate an
+- **Untertitel-Support** - Automatische Erkennung von SRT, ASS, VTT Dateien
+- **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
+- **Abspiellisten-Import** - M3U und PLS Format-Support
+- **Intuitive Steuerung**: Previous, Next, Play, Pause, Stop, Seek, Volume
 
 ### ⚡ Hardware-Beschleunigung
 - **AMD GPUs**: VA-API für Dekodierung + Enkodierung (bis 8K)
@@ -169,11 +175,63 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 ### Video abspielen
 
 1. Klicke auf das Ordner-Symbol in der Header-Bar, um eine Video-Datei zu öffnen
-2. Das Video wird automatisch in der Vorschau angezeigt
+2. Das Video wird automatisch zur Playlist hinzugefügt und in der Vorschau angezeigt
 3. Nutze die Steuerelemente am unteren Rand:
-   - Play-Button: Wiedergabe starten
-   - Pause-Button: Wiedergabe pausieren
-   - Stop-Button: Wiedergabe stoppen
+   - **Previous-Button**: Vorheriges Video in Playlist
+   - **Play-Button**: Wiedergabe starten
+   - **Pause-Button**: Wiedergabe pausieren
+   - **Stop-Button**: Wiedergabe stoppen
+   - **Next-Button**: Nächstes Video in Playlist
+   - **Lautstärke-Slider**: Lautstärke anpassen (0-100%)
+   - **Timeline-Slider**: Zu beliebiger Position springen
+
+### Playlist verwenden
+
+1. **Videos hinzufügen**:
+   - Klicke auf **+** in der Playlist-Sektion, um mehrere Videos auszuwählen
+   - **ODER** ziehe einfach Video-Dateien per Drag & Drop ins Fenster
+2. Die Videos werden in der Reihenfolge abgespielt
+3. Nach Ende eines Videos startet automatisch das nächste (Auto-Advance)
+4. Klicke auf ein Video in der Playlist, um direkt dorthin zu springen
+5. Nutze **Previous** und **Next** Buttons zum Navigieren
+6. Entferne einzelne Videos mit dem **X**-Button
+7. **Playlist importieren**:
+   - Klicke auf den **Import-Button** (Ordner-Symbol) in der Playlist-Sektion.
+   - Wähle eine `.m3u`- oder `.pls`-Datei aus.
+   - Die enthaltenen Videos werden automatisch zur Playlist hinzugefügt.
+7. Leere die gesamte Playlist mit dem **Papierkorb**-Button
+
+### Drag & Drop verwenden
+
+1. Öffne deinen Dateimanager und navigiere zu deinen Videos
+2. Wähle ein oder mehrere Video-Dateien aus
+3. Ziehe sie ins Video-Player-Fenster
+4. Die Videos werden automatisch zur Playlist hinzugefügt
+5. Das erste Video startet automatisch die Wiedergabe (falls noch kein Video läuft)
+6. **Visuelles Feedback**: Der Bereich wird blau umrandet beim Darüberziehen
+
+### Chromecast verwenden
+
+1. **Vollbild-Modus**
+   - Drücke die **F11**-Taste, um in den Vollbild-Modus zu wechseln und ihn wieder zu verlassen.
+   - Alternativ kannst du den Vollbild-Button in der Kopfleiste verwenden.
+
+### Tastatur-Shortcuts
+
+- **Leertaste**: Wiedergabe / Pause
+- **Pfeil nach rechts**: 5 Sekunden vorspulen
+- **Pfeil nach links**: 5 Sekunden zurückspulen
+- **Pfeil nach oben**: Lautstärke erhöhen
+- **Pfeil nach unten**: Lautstärke verringern
+- **M**: Stummschalten / Ton an
+- **F**: Vollbildmodus umschalten
+- **F11**: Vollbildmodus umschalten
+
+### Untertitel verwenden
+
+1. **Automatische Erkennung**: Lege eine Untertitel-Datei (`.srt`, `.ass`, `.vtt`) in denselben Ordner wie dein Video. Die Datei muss denselben Namen haben (z.B. `MeinFilm.mp4` und `MeinFilm.srt`).
+2. **Auswählen**: Wenn ein Video mit Untertiteln geladen wird, wird der Untertitel-Button (Sprechblase) in der Kopfleiste aktiv.
+3. Klicke auf den Button, um eine Untertitel-Spur auszuwählen oder die Untertitel zu deaktivieren.
 
 ### Chromecast verwenden
 
@@ -505,24 +563,41 @@ Wenn du einen Bug findest:
 
 ## 🚀 Roadmap / Zukünftige Features
 
-- [ ] **Playlist-Unterstützung** - Mehrere Videos in einer Warteschlange
-- [ ] **Untertitel-Support** - SRT, ASS, VTT Dateien
-- [ ] **Lautstärkeregelung** - Lokale und Chromecast Lautstärke-Kontrolle
-- [ ] **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
-- [ ] **Drag-and-Drop** - Videos einfach in das Fenster ziehen
-- [ ] **Tastatur-Shortcuts** - Space (Play/Pause), Pfeiltasten (Seek), etc.
-- [ ] **Video-Info-Overlay** - Codec, Bitrate, Auflösung anzeigen
+- [x] **Playlist-Unterstützung** - Mehrere Videos in einer Warteschlange ✓
+- [x] **Vollbild-Modus** - F11 für Vollbild-Wiedergabe ✓
+- [x] **Drag-and-Drop** - Videos einfach in das Fenster ziehen ✓
+- [x] **Video-Info-Overlay** - Codec, Bitrate, Auflösung anzeigen ✓
+- [x] **Lautstärkeregelung** - Lokale und Chromecast Lautstärke-Kontrolle ✓
+- [x] **Untertitel-Support** - SRT, ASS, VTT Dateien ✓
+- [x] **Tastatur-Shortcuts** - Space (Play/Pause), Pfeiltasten (Seek), etc. ✓
+- [x] **Abspiellisten-Import** - M3U/PLS Format-Support ✓
 - [ ] **Audio-Track-Auswahl** - Bei mehrsprachigen Videos
-- [ ] **Abspiellisten-Import** - M3U/PLS Format-Support
 
 ## 📊 Version History
 
-### Version 1.2.0 (Dezember 2025)
+### Version 1.4.0 (Dezember 2025)
+- ✨ **Abspiellisten-Import** - M3U und PLS Format-Support
+
+- ### Version 1.3.0 (Dezember 2025)
+- ✨ **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
+- ✨ **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
+- ✨ **Drag & Drop** - Videos direkt ins Fenster ziehen
+- ✨ **Video-Info-Overlay** - Zeigt Codec, Auflösung und Bitrate an
+- ✨ **Untertitel-Support** - Automatische Erkennung von SRT, ASS, VTT Dateien
+
+- ### Version 1.2.0 (Dezember 2025)
+- ✨ **Playlist-Unterstützung** - Mehrere Videos in Warteschlange mit Auto-Advance
+- ✨ **Drag & Drop** - Videos direkt ins Fenster ziehen (einzeln oder mehrere)
 - ✨ Timeline/Seek-Funktion für lokale und Chromecast-Wiedergabe
+- ✨ Lautstärkeregelung mit Slider für lokale und Chromecast-Wiedergabe
 - ✨ NVIDIA Hardware-Beschleunigung (NVDEC/NVENC)
 - 🐛 Verbesserte Chromecast-Kompatibilität (Xiaomi TVs)
 - ⚡ Chromecast-Gerätesuche 30x schneller (500ms statt 15s)
 - 🔧 Modus-Wechsel zwischen Lokal und Chromecast optimiert
+- 🎚️ Automatische Lautstärke-Synchronisation beim Moduswechsel
+- ⏭️ Previous/Next Video Buttons für Playlist-Navigation
+- 🎵 Playlist-Verwaltung: Hinzufügen, Entfernen, Auswählen
+- 🎨 Visuelles Feedback beim Drag-and-Drop (blaue Umrandung)
 
 
 ### Version 1.0.0 (Dezember 2025)
