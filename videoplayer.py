@@ -1198,11 +1198,39 @@ class VideoPlayer(Gtk.Box):
         self.video_widget.set_content_fit(Gtk.ContentFit.COVER)
         self.video_widget.set_hexpand(True)
 
+        # Video-Equalizer (videobalance)
+        self.videobalance = Gst.ElementFactory.make("videobalance", "balance")
+        self.videoconvert = Gst.ElementFactory.make("videoconvert", "convert")
+
         # Video-Sink für GTK
         self.gtksink = Gst.ElementFactory.make("gtk4paintablesink", "sink")
+
+        # Erstelle bin mit videobalance -> videoconvert -> gtksink
+        video_bin = Gst.Bin.new("video_bin")
+        video_bin.add(self.videobalance)
+        video_bin.add(self.videoconvert)
+        video_bin.add(self.gtksink)
+
+        # Verknüpfe Elemente
+        self.videobalance.link(self.videoconvert)
+        self.videoconvert.link(self.gtksink)
+
+        # Erstelle Ghost-Pad für Eingang
+        sink_pad = self.videobalance.get_static_pad("sink")
+        ghost_pad = Gst.GhostPad.new("sink", sink_pad)
+        video_bin.add_pad(ghost_pad)
+
         paintable = self.gtksink.get_property("paintable")
         self.video_widget.set_paintable(paintable)
-        self.playbin.set_property("video-sink", self.gtksink)
+        self.playbin.set_property("video-sink", video_bin)
+
+        # Standard-Equalizer-Werte
+        self.equalizer_settings = {
+            'brightness': 0.0,
+            'contrast': 1.0,
+            'saturation': 1.0,
+            'hue': 0.0
+        }
 
         self.append(self.video_widget)
 
@@ -1395,6 +1423,41 @@ class VideoPlayer(Gtk.Box):
             import traceback
             traceback.print_exc()
             return False
+
+    def set_equalizer(self, brightness=None, contrast=None, saturation=None, hue=None):
+        """Setzt Video-Equalizer-Werte (brightness: -1 bis 1, contrast: 0 bis 2, saturation: 0 bis 2, hue: -1 bis 1)"""
+        if brightness is not None:
+            brightness = max(-1.0, min(1.0, brightness))
+            self.videobalance.set_property("brightness", brightness)
+            self.equalizer_settings['brightness'] = brightness
+            print(f"Helligkeit: {brightness}")
+
+        if contrast is not None:
+            contrast = max(0.0, min(2.0, contrast))
+            self.videobalance.set_property("contrast", contrast)
+            self.equalizer_settings['contrast'] = contrast
+            print(f"Kontrast: {contrast}")
+
+        if saturation is not None:
+            saturation = max(0.0, min(2.0, saturation))
+            self.videobalance.set_property("saturation", saturation)
+            self.equalizer_settings['saturation'] = saturation
+            print(f"Sättigung: {saturation}")
+
+        if hue is not None:
+            hue = max(-1.0, min(1.0, hue))
+            self.videobalance.set_property("hue", hue)
+            self.equalizer_settings['hue'] = hue
+            print(f"Farbton: {hue}")
+
+    def get_equalizer(self):
+        """Gibt die aktuellen Equalizer-Einstellungen zurück"""
+        return self.equalizer_settings.copy()
+
+    def reset_equalizer(self):
+        """Setzt Equalizer auf Standard-Werte zurück"""
+        self.set_equalizer(brightness=0.0, contrast=1.0, saturation=1.0, hue=0.0)
+        print("Equalizer zurückgesetzt")
 
     def on_gst_message(self, bus, message):
         t = message.type
@@ -1600,6 +1663,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Wiedergabegeschwindigkeit
         self.current_playback_rate = 1.0
 
+        # A-B Loop
+        self.ab_loop_enabled = False
+        self.ab_loop_a = None  # Start-Position in Sekunden
+        self.ab_loop_b = None  # End-Position in Sekunden
+
         # Cleanup beim Schließen
         self.connect("close-request", self.on_close_request)
 
@@ -1690,6 +1758,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         window_height = self.config.get_setting("window_height", 700)
         self.set_default_size(window_width, window_height)
 
+        # Registriere Window-Actions für Menüs
+        self.setup_actions()
+
     def setup_drop_css(self):
         """Fügt CSS für Drag-and-Drop visuelles Feedback hinzu"""
         css_provider = Gtk.CssProvider()
@@ -1717,6 +1788,35 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+    def setup_actions(self):
+        """Registriert Window-Actions für Menüs"""
+        # Speed Action
+        speed_action = Gio.SimpleAction.new_stateful(
+            "set_speed",
+            GLib.VariantType.new('d'),
+            GLib.Variant('d', 1.0)
+        )
+        speed_action.connect("activate", self.on_set_speed)
+        self.add_action(speed_action)
+
+        # Subtitle Action
+        subtitle_action = Gio.SimpleAction.new_stateful(
+            "set_subtitle",
+            GLib.VariantType.new('i'),
+            GLib.Variant('i', -1)
+        )
+        subtitle_action.connect("activate", self.on_set_subtitle)
+        self.add_action(subtitle_action)
+
+        # Audio Action
+        audio_action = Gio.SimpleAction.new_stateful(
+            "set_audio",
+            GLib.VariantType.new('i'),
+            GLib.Variant('i', 0)
+        )
+        audio_action.connect("activate", self.on_set_audio)
+        self.add_action(audio_action)
 
     def setup_drag_and_drop(self):
         """Richtet Drag-and-Drop für Videos ein"""
@@ -1871,6 +1971,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.speed_popover.set_menu_model(speed_menu)
         self.speed_button.set_popover(self.speed_popover)
         header.pack_end(self.speed_button)
+
+        # Video-Equalizer-Button
+        self.equalizer_button = Gtk.MenuButton()
+        self.equalizer_button.set_icon_name("preferences-color-symbolic")
+        self.equalizer_button.set_tooltip_text("Video-Equalizer")
+        self.equalizer_button.set_sensitive(False) # Deaktiviert bis Video geladen
+
+        # Erstelle Equalizer-Popover
+        self.equalizer_popover = self.create_equalizer_popover()
+        self.equalizer_button.set_popover(self.equalizer_popover)
+        header.pack_end(self.equalizer_button)
 
         # Vollbild-Button
         self.fullscreen_button = Gtk.Button()
@@ -2059,6 +2170,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if self.timeline_scale.get_sensitive():
                 self.timeline_scale.set_sensitive(False)
 
+        # Überprüfe A-B Loop
+        self.check_ab_loop()
+
         return True  # Timeout fortsetzen
 
     @staticmethod
@@ -2177,6 +2291,34 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.next_button.set_sensitive(False)
         self.control_box.append(self.next_button)
 
+        # A-B Loop Buttons
+        ab_separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        ab_separator.set_margin_start(12)
+        ab_separator.set_margin_end(12)
+        self.control_box.append(ab_separator)
+
+        # A-Button (Startpunkt setzen)
+        self.ab_button_a = Gtk.Button(label="A")
+        self.ab_button_a.set_tooltip_text("A-B Loop: Startpunkt setzen (Taste 'A')")
+        self.ab_button_a.connect("clicked", self.on_set_loop_a)
+        self.ab_button_a.set_sensitive(False)
+        self.control_box.append(self.ab_button_a)
+
+        # B-Button (Endpunkt setzen)
+        self.ab_button_b = Gtk.Button(label="B")
+        self.ab_button_b.set_tooltip_text("A-B Loop: Endpunkt setzen (Taste 'B')")
+        self.ab_button_b.connect("clicked", self.on_set_loop_b)
+        self.ab_button_b.set_sensitive(False)
+        self.control_box.append(self.ab_button_b)
+
+        # Clear Loop Button
+        self.ab_button_clear = Gtk.Button()
+        self.ab_button_clear.set_icon_name("edit-clear-symbolic")
+        self.ab_button_clear.set_tooltip_text("A-B Loop löschen (Taste 'C')")
+        self.ab_button_clear.connect("clicked", self.on_clear_loop)
+        self.ab_button_clear.set_sensitive(False)
+        self.control_box.append(self.ab_button_clear)
+
         # Lautstärke-Kontrolle
         volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         volume_box.set_margin_start(24)
@@ -2213,6 +2355,179 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         mode_box.append(self.mode_label)
 
         self.control_box.append(mode_box)
+
+    def create_equalizer_popover(self):
+        """Erstellt das Popover für den Video-Equalizer"""
+        popover = Gtk.Popover()
+
+        # Hauptcontainer
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        # Titel
+        title_label = Gtk.Label(label="Video-Equalizer")
+        title_label.add_css_class("title-4")
+        box.append(title_label)
+
+        # Helligkeit
+        brightness_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        brightness_label = Gtk.Label(label="Helligkeit")
+        brightness_label.set_xalign(0)
+        brightness_box.append(brightness_label)
+
+        self.brightness_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -1.0, 1.0, 0.1)
+        self.brightness_scale.set_value(0.0)
+        self.brightness_scale.set_draw_value(True)
+        self.brightness_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.brightness_scale.set_hexpand(True)
+        self.brightness_scale.connect("value-changed", self.on_brightness_changed)
+        brightness_box.append(self.brightness_scale)
+        box.append(brightness_box)
+
+        # Kontrast
+        contrast_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        contrast_label = Gtk.Label(label="Kontrast")
+        contrast_label.set_xalign(0)
+        contrast_box.append(contrast_label)
+
+        self.contrast_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 2.0, 0.1)
+        self.contrast_scale.set_value(1.0)
+        self.contrast_scale.set_draw_value(True)
+        self.contrast_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.contrast_scale.set_hexpand(True)
+        self.contrast_scale.connect("value-changed", self.on_contrast_changed)
+        contrast_box.append(self.contrast_scale)
+        box.append(contrast_box)
+
+        # Sättigung
+        saturation_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        saturation_label = Gtk.Label(label="Sättigung")
+        saturation_label.set_xalign(0)
+        saturation_box.append(saturation_label)
+
+        self.saturation_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 2.0, 0.1)
+        self.saturation_scale.set_value(1.0)
+        self.saturation_scale.set_draw_value(True)
+        self.saturation_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.saturation_scale.set_hexpand(True)
+        self.saturation_scale.connect("value-changed", self.on_saturation_changed)
+        saturation_box.append(self.saturation_scale)
+        box.append(saturation_box)
+
+        # Farbton
+        hue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        hue_label = Gtk.Label(label="Farbton")
+        hue_label.set_xalign(0)
+        hue_box.append(hue_label)
+
+        self.hue_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -1.0, 1.0, 0.1)
+        self.hue_scale.set_value(0.0)
+        self.hue_scale.set_draw_value(True)
+        self.hue_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.hue_scale.set_hexpand(True)
+        self.hue_scale.connect("value-changed", self.on_hue_changed)
+        hue_box.append(self.hue_scale)
+        box.append(hue_box)
+
+        # Reset Button
+        reset_button = Gtk.Button(label="Zurücksetzen")
+        reset_button.connect("clicked", self.on_equalizer_reset)
+        box.append(reset_button)
+
+        popover.set_child(box)
+        return popover
+
+    def on_brightness_changed(self, scale):
+        """Callback für Helligkeit-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_equalizer(brightness=value)
+
+    def on_contrast_changed(self, scale):
+        """Callback für Kontrast-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_equalizer(contrast=value)
+
+    def on_saturation_changed(self, scale):
+        """Callback für Sättigung-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_equalizer(saturation=value)
+
+    def on_hue_changed(self, scale):
+        """Callback für Farbton-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_equalizer(hue=value)
+
+    def on_equalizer_reset(self, _button):
+        """Reset Equalizer auf Standard-Werte"""
+        self.brightness_scale.set_value(0.0)
+        self.contrast_scale.set_value(1.0)
+        self.saturation_scale.set_value(1.0)
+        self.hue_scale.set_value(0.0)
+        self.video_player.reset_equalizer()
+
+    def on_set_loop_a(self, _button):
+        """Setzt den Startpunkt (A) für A-B Loop"""
+        position = self.get_current_position()
+        if position is not None:
+            self.ab_loop_a = position
+            self.ab_button_a.add_css_class("suggested-action")
+            self.status_label.set_text(f"Loop Punkt A gesetzt: {self.format_time(position)}")
+            print(f"A-B Loop: Punkt A gesetzt bei {position:.1f}s")
+
+            # Aktiviere Clear-Button
+            self.ab_button_clear.set_sensitive(True)
+
+            # Wenn B bereits gesetzt ist, aktiviere Loop
+            if self.ab_loop_b is not None and self.ab_loop_a < self.ab_loop_b:
+                self.ab_loop_enabled = True
+                self.ab_button_b.add_css_class("suggested-action")
+                self.status_label.set_text(f"Loop aktiv: {self.format_time(self.ab_loop_a)} - {self.format_time(self.ab_loop_b)}")
+
+    def on_set_loop_b(self, _button):
+        """Setzt den Endpunkt (B) für A-B Loop"""
+        position = self.get_current_position()
+        if position is not None:
+            # B muss nach A liegen
+            if self.ab_loop_a is not None and position <= self.ab_loop_a:
+                self.status_label.set_text("Punkt B muss nach Punkt A liegen!")
+                return
+
+            self.ab_loop_b = position
+            self.ab_button_b.add_css_class("suggested-action")
+            self.status_label.set_text(f"Loop Punkt B gesetzt: {self.format_time(position)}")
+            print(f"A-B Loop: Punkt B gesetzt bei {position:.1f}s")
+
+            # Aktiviere Clear-Button
+            self.ab_button_clear.set_sensitive(True)
+
+            # Wenn A bereits gesetzt ist, aktiviere Loop
+            if self.ab_loop_a is not None and self.ab_loop_a < self.ab_loop_b:
+                self.ab_loop_enabled = True
+                self.ab_button_a.add_css_class("suggested-action")
+                self.status_label.set_text(f"Loop aktiv: {self.format_time(self.ab_loop_a)} - {self.format_time(self.ab_loop_b)}")
+
+    def on_clear_loop(self, _button):
+        """Löscht den A-B Loop"""
+        self.ab_loop_enabled = False
+        self.ab_loop_a = None
+        self.ab_loop_b = None
+        self.ab_button_a.remove_css_class("suggested-action")
+        self.ab_button_b.remove_css_class("suggested-action")
+        self.ab_button_clear.set_sensitive(False)
+        self.status_label.set_text("A-B Loop gelöscht")
+        print("A-B Loop: Loop gelöscht")
+
+    def check_ab_loop(self):
+        """Überprüft, ob die Position den B-Punkt überschritten hat und springt zu A zurück"""
+        if self.ab_loop_enabled and self.ab_loop_a is not None and self.ab_loop_b is not None:
+            position = self.get_current_position()
+            if position is not None and position >= self.ab_loop_b:
+                # Springe zurück zu Punkt A
+                self.seek_to_position(self.ab_loop_a)
+                print(f"A-B Loop: Zurück zu Punkt A ({self.ab_loop_a:.1f}s)")
 
     def on_open_file(self, button):
         """Öffnet Dateiauswahl-Dialog"""
@@ -2262,10 +2577,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # Info-Overlay vorbereiten
                 self.info_label.set_opacity(0.0)
 
-                # Untertitel-, Audio- und Speed-Menü zurücksetzen
+                # Untertitel-, Audio-, Speed- und Equalizer-Menü zurücksetzen
                 self.subtitle_button.set_sensitive(False)
                 self.audio_button.set_sensitive(False)
                 self.speed_button.set_sensitive(True)  # Speed ist immer für lokale Wiedergabe verfügbar
+                self.equalizer_button.set_sensitive(True)  # Equalizer ist immer für lokale Wiedergabe verfügbar
+
+                # A-B Loop Buttons aktivieren
+                self.ab_button_a.set_sensitive(True)
+                self.ab_button_b.set_sensitive(True)
 
                 # Timeline aktivieren nach kurzem Delay
                 def enable_timeline():
@@ -2907,9 +3227,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.start_timeline_updates()
             # Info-Overlay vorbereiten
             self.info_label.set_opacity(0.0)
-            # Untertitel-Menü zurücksetzen
+
+            # Buttons für lokale Wiedergabe aktivieren/deaktivieren
             self.subtitle_button.set_sensitive(False)
-            
+            self.audio_button.set_sensitive(False)
+            self.speed_button.set_sensitive(True)  # Speed ist immer für lokale Wiedergabe verfügbar
+            self.equalizer_button.set_sensitive(True)  # Equalizer ist immer für lokale Wiedergabe verfügbar
+            self.ab_button_a.set_sensitive(True)
+            self.ab_button_b.set_sensitive(True)
+
             # Play-Button aktualisieren
             self.play_button.set_icon_name("media-playback-pause-symbolic")
             self.play_button.disconnect_by_func(self.on_play)
@@ -3005,9 +3331,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             "p": Gdk.KEY_p,
             "P": Gdk.KEY_P,
             "s": Gdk.KEY_s,
-            "S": Gdk.KEY_S
+            "S": Gdk.KEY_S,
+            "a": Gdk.KEY_a,
+            "A": Gdk.KEY_A,
+            "b": Gdk.KEY_b,
+            "B": Gdk.KEY_B,
+            "c": Gdk.KEY_c,
+            "C": Gdk.KEY_C
         }
-        
+
         # Prüfe alle Shortcuts
         if keyval == key_map.get(shortcuts.get("fullscreen", "F11"), Gdk.KEY_F11):
             self.on_toggle_fullscreen(None)
@@ -3038,6 +3370,18 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             return True
         elif keyval == key_map.get(shortcuts.get("screenshot", "s"), Gdk.KEY_s):
             self.take_screenshot()
+            return True
+        elif keyval == key_map.get(shortcuts.get("ab_loop_a", "a"), Gdk.KEY_a):
+            if self.ab_button_a.get_sensitive():
+                self.on_set_loop_a(None)
+            return True
+        elif keyval == key_map.get(shortcuts.get("ab_loop_b", "b"), Gdk.KEY_b):
+            if self.ab_button_b.get_sensitive():
+                self.on_set_loop_b(None)
+            return True
+        elif keyval == key_map.get(shortcuts.get("ab_loop_clear", "c"), Gdk.KEY_c):
+            if self.ab_button_clear.get_sensitive():
+                self.on_clear_loop(None)
             return True
         return False
 
@@ -3237,7 +3581,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="1.6.0",
+            version="1.7.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
@@ -3248,7 +3592,18 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Füge Version-Informationen als Credit-Sections hinzu
         about.add_credit_section(
-            "Was ist neu in Version 1.6.0?",
+            "Was ist neu in Version 1.7.0?",
+            [
+                "Video-Equalizer - Helligkeit, Kontrast, Sättigung, Farbton",
+                "A-B Loop - Wiederholungsschleife für Lern-Videos",
+                "Equalizer-Button mit 4 Slidern und Reset-Funktion",
+                "A-B Loop Buttons (A, B, Clear) in Kontrollleiste",
+                "Tastaturverknüpfungen: A (Loop Start), B (Loop Ende), C (Clear)"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.6.0",
             [
                 "Wiedergabegeschwindigkeit - 0.5x bis 2.0x einstellbar",
                 "Screenshot-Funktion - S-Taste für Frame-Capture",

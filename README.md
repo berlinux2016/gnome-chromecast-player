@@ -45,6 +45,8 @@
 - **Lesezeichen/Resume** - Automatisches Speichern und Fortsetzen der Wiedergabe
 - **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x mit Dropdown-Menü
 - **Screenshot-Funktion** - Frame-Capture mit S-Taste
+- **Video-Equalizer** - Helligkeit, Kontrast, Sättigung und Farbton anpassen
+- **A-B Loop** - Wiederholungsschleife zwischen zwei Punkten für Lern-Videos
 - **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
 - **Abspiellisten-Import** - M3U und PLS Format-Support
 - **Intuitive Steuerung**: Previous, Next, Play, Pause, Stop, Seek, Volume
@@ -231,6 +233,11 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 - **F**: Vollbildmodus umschalten
 - **F11**: Vollbildmodus umschalten
 - **S**: Screenshot vom aktuellen Frame
+- **A**: A-B Loop Startpunkt (A) setzen
+- **B**: A-B Loop Endpunkt (B) setzen
+- **C**: A-B Loop löschen (Clear)
+- **N**: Nächstes Video in Playlist
+- **P**: Vorheriges Video in Playlist
 
 ### Untertitel verwenden
 
@@ -264,6 +271,28 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 2. Der Screenshot wird automatisch gespeichert in: `~/Pictures/Video-Screenshots/`
 3. Dateiname-Format: `VideoName_20251209_153045.png` (mit Timestamp).
 4. Eine Bestätigung erscheint in der Statusleiste.
+
+### Video-Equalizer verwenden
+
+1. Klicke auf den Equalizer-Button (Farb-Symbol) in der Kopfleiste.
+2. Passe die folgenden Werte mit den Slidern an:
+   - **Helligkeit**: -1.0 bis +1.0 (0 = Standard)
+   - **Kontrast**: 0.0 bis 2.0 (1.0 = Standard)
+   - **Sättigung**: 0.0 bis 2.0 (1.0 = Standard)
+   - **Farbton**: -1.0 bis +1.0 (0 = Standard)
+3. Änderungen werden sofort angewendet.
+4. Klicke auf **Zurücksetzen**, um alle Werte auf Standard zurückzusetzen.
+5. Perfekt für Videos mit schlechter Farbqualität oder zu dunklen Szenen.
+
+### A-B Loop verwenden (Wiederholungsschleife)
+
+1. Spiele ein Video ab und navigiere zum gewünschten **Startpunkt**.
+2. Drücke die **A-Taste** oder klicke auf den **A-Button**, um Punkt A zu setzen.
+3. Navigiere zum gewünschten **Endpunkt**.
+4. Drücke die **B-Taste** oder klicke auf den **B-Button**, um Punkt B zu setzen.
+5. Die Schleife ist nun aktiv - das Video springt automatisch zu Punkt A zurück, wenn Punkt B erreicht wird.
+6. Um die Schleife zu löschen, drücke die **C-Taste** oder klicke auf den **Clear-Button** (X).
+7. Perfekt für Lern-Videos, Sprach-Training oder Musik-Loops.
 
 ### Chromecast verwenden
 
@@ -607,10 +636,22 @@ Wenn du einen Bug findest:
 - [x] **Lesezeichen/Resume-Funktion** - Automatisches Speichern und Fortsetzen ✓
 - [x] **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x ✓
 - [x] **Screenshot-Funktion** - Frame-Capture mit S-Taste ✓
-- [ ] **Video-Equalizer** - Helligkeit, Kontrast, Sättigung
+- [x] **Video-Equalizer** - Helligkeit, Kontrast, Sättigung, Farbton ✓
+- [x] **A-B Loop** - Wiederholungsschleife für Lern-Videos ✓
 - [ ] **Picture-in-Picture** - Schwebendes Mini-Fenster
+- [ ] **Kapitel-Erkennung** - Automatische Erkennung von Kapiteln in Videos
+- [ ] **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline
 
 ## 📊 Version History
+
+### Version 1.7.0 (Dezember 2025)
+- ✨ **Video-Equalizer** - Echtzeit-Anpassung von Helligkeit, Kontrast, Sättigung und Farbton
+- ✨ **A-B Loop** - Wiederholungsschleife zwischen zwei Punkten für Lern-Videos
+- 🎨 Equalizer-Button in Header-Bar mit 4 Slidern und Reset-Funktion
+- 🔄 A-B Loop Buttons (A, B, Clear) in der Kontrollleiste
+- 🎮 Neue Tastaturverknüpfungen: A (Loop Start), B (Loop Ende), C (Loop löschen)
+- 🎞️ Visuelle Markierung aktiver Loop-Punkte durch farbige Buttons
+- ⚡ GStreamer videobalance Element für Hardware-beschleunigte Video-Anpassungen
 
 ### Version 1.6.0 (Dezember 2025)
 - ✨ **Wiedergabegeschwindigkeit** - Einstellbare Geschwindigkeit von 0.5x bis 2.0x
