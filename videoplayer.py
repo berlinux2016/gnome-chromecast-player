@@ -18,6 +18,7 @@ from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import quote
+from queue import Queue
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -1002,6 +1003,254 @@ class ChromecastManager:
                 return 0.5  # Standardwert bei Fehler
         return 0.5  # Standardwert wenn nicht verbunden
 
+    def enable_subtitles(self, subtitle_url, subtitle_lang='en-US', subtitle_name='Subtitles'):
+        """Aktiviert Untertitel für Chromecast-Wiedergabe
+
+        Args:
+            subtitle_url (str): URL zur Untertitel-Datei (SRT, VTT)
+            subtitle_lang (str): Sprach-Code (z.B. 'de-DE', 'en-US')
+            subtitle_name (str): Anzeige-Name für Untertitel
+        """
+        if not self.mc or not self.mc.status:
+            print("✗ Kein aktiver Chromecast-Stream")
+            return False
+
+        try:
+            print(f"\n=== Aktiviere Chromecast-Untertitel ===")
+            print(f"URL: {subtitle_url}")
+            print(f"Sprache: {subtitle_lang}")
+
+            # Erstelle Track-Metadaten
+            tracks = [{
+                'trackId': 1,
+                'type': 'TEXT',
+                'trackContentId': subtitle_url,
+                'trackContentType': 'text/vtt',  # VTT wird besser unterstützt als SRT
+                'name': subtitle_name,
+                'language': subtitle_lang,
+                'subtype': 'SUBTITLES'
+            }]
+
+            # Update Media mit Untertiteln
+            current_time = self.mc.status.current_time or 0
+            self.mc.play_media(
+                self.mc.status.content_id,
+                self.mc.status.content_type,
+                current_time=current_time,
+                autoplay=True,
+                subtitles=tracks
+            )
+
+            # Aktiviere erste Untertitel-Spur
+            self.mc.update_status()
+            time.sleep(0.5)
+            self.mc.enable_subtitle(1)
+
+            print("✓ Untertitel aktiviert")
+            return True
+
+        except Exception as e:
+            print(f"✗ Fehler beim Aktivieren der Untertitel: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def disable_subtitles(self):
+        """Deaktiviert Untertitel für Chromecast"""
+        if self.mc:
+            try:
+                self.mc.disable_subtitle()
+                print("✓ Untertitel deaktiviert")
+                return True
+            except Exception as e:
+                print(f"✗ Fehler beim Deaktivieren der Untertitel: {e}")
+                return False
+        return False
+
+    def set_audio_track(self, track_id):
+        """Wählt eine Audio-Spur für Chromecast aus
+
+        Args:
+            track_id (int): Track-ID der gewünschten Audio-Spur
+        """
+        if not self.mc:
+            print("✗ Kein aktiver Chromecast-Stream")
+            return False
+
+        try:
+            print(f"Wähle Chromecast Audio-Track {track_id}")
+            # Nutze die native Chromecast-Funktion zum Wechseln der Audio-Spur
+            self.mc.enable_subtitle(track_id)  # Trotz des Namens funktioniert es auch für Audio
+            print(f"✓ Audio-Track {track_id} ausgewählt")
+            return True
+        except Exception as e:
+            print(f"✗ Fehler beim Wechseln der Audio-Spur: {e}")
+            return False
+
+    def get_extended_status(self):
+        """Gibt erweiterte Chromecast-Status-Informationen zurück
+
+        Returns:
+            dict: Status-Dictionary mit allen verfügbaren Informationen
+        """
+        if not self.selected_cast:
+            return {
+                'connected': False,
+                'device_name': 'Nicht verbunden',
+                'app_name': 'N/A',
+                'player_state': 'IDLE',
+                'volume': 0.0,
+                'is_muted': False,
+                'current_time': 0.0,
+                'duration': 0.0,
+                'buffer_percent': 0,
+                'media_title': 'N/A',
+                'content_type': 'N/A'
+            }
+
+        status = {
+            'connected': True,
+            'device_name': self.selected_cast.name,
+            'device_model': self.selected_cast.model_name,
+            'device_uuid': self.selected_cast.uuid,
+            'cast_type': self.selected_cast.cast_type,
+            'app_name': self.selected_cast.app_display_name or 'Keine App',
+            'app_id': self.selected_cast.app_id,
+            'volume': self.selected_cast.status.volume_level if self.selected_cast.status else 0.0,
+            'is_muted': self.selected_cast.status.volume_muted if self.selected_cast.status else False,
+        }
+
+        if self.mc and self.mc.status:
+            media_status = self.mc.status
+            status.update({
+                'player_state': media_status.player_state,
+                'current_time': media_status.current_time or 0.0,
+                'duration': media_status.duration or 0.0,
+                'media_title': media_status.title or 'Unbekannt',
+                'content_type': media_status.content_type or 'N/A',
+                'content_id': media_status.content_id or 'N/A',
+                'stream_type': media_status.stream_type,
+                'idle_reason': getattr(media_status, 'idle_reason', None),
+                'supports_pause': media_status.supports_pause,
+                'supports_seek': media_status.supports_seek,
+            })
+
+            # Berechne Buffer-Prozentsatz
+            if media_status.duration and media_status.duration > 0:
+                status['buffer_percent'] = int((media_status.current_time / media_status.duration) * 100)
+            else:
+                status['buffer_percent'] = 0
+        else:
+            status.update({
+                'player_state': 'IDLE',
+                'current_time': 0.0,
+                'duration': 0.0,
+                'buffer_percent': 0,
+                'media_title': 'N/A',
+                'content_type': 'N/A'
+            })
+
+        return status
+
+    def discover_cast_groups(self):
+        """Entdeckt Chromecast-Gruppen für Multi-Room-Audio
+
+        Returns:
+            list: Liste von gefundenen Gruppen
+        """
+        groups = []
+
+        if not self._zconf_instance:
+            print("✗ Zeroconf nicht initialisiert")
+            return groups
+
+        try:
+            print("\n=== Suche nach Chromecast-Gruppen ===")
+
+            # Durchsuche alle gefundenen Geräte nach Gruppen
+            for uuid, service in self._found_devices.items():
+                # Gruppen haben meist "Google Cast Group" im Namen oder sind vom Typ "group"
+                if hasattr(service, 'cast_type') and service.cast_type == 'group':
+                    groups.append({
+                        'uuid': uuid,
+                        'name': service.friendly_name,
+                        'service': service
+                    })
+                    print(f"✓ Gruppe gefunden: {service.friendly_name}")
+
+            if not groups:
+                print("ℹ Keine Chromecast-Gruppen gefunden")
+                print("  Hinweis: Erstelle Gruppen in der Google Home App")
+            else:
+                print(f"✓ {len(groups)} Gruppe(n) gefunden")
+
+            return groups
+
+        except Exception as e:
+            print(f"✗ Fehler bei der Gruppen-Suche: {e}")
+            import traceback
+            traceback.print_exc()
+            return groups
+
+    def connect_to_group(self, group_service):
+        """Verbindet mit einer Chromecast-Gruppe für Multi-Room-Audio
+
+        Args:
+            group_service: Service-Objekt der Gruppe
+
+        Returns:
+            bool: True bei erfolgreicher Verbindung
+        """
+        try:
+            print(f"\n=== Verbinde mit Gruppe '{group_service.friendly_name}' ===")
+
+            # Verbinde wie mit einem normalen Gerät
+            success = self.connect_to_chromecast(group_service)
+
+            if success:
+                print("✓ Erfolgreich mit Gruppe verbunden")
+                print("  Audio wird auf allen Geräten der Gruppe synchronisiert abgespielt")
+                return True
+            else:
+                print("✗ Verbindung zur Gruppe fehlgeschlagen")
+                return False
+
+        except Exception as e:
+            print(f"✗ Fehler bei Gruppen-Verbindung: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def get_group_members(self):
+        """Gibt Mitglieder der aktuell verbundenen Gruppe zurück
+
+        Returns:
+            list: Liste von Geräte-Namen in der Gruppe
+        """
+        if not self.selected_cast:
+            return []
+
+        try:
+            # Prüfe ob es eine Gruppe ist
+            if hasattr(self.selected_cast, 'cast_type') and self.selected_cast.cast_type == 'group':
+                # Versuche Gruppen-Informationen zu erhalten
+                if hasattr(self.selected_cast, 'status') and hasattr(self.selected_cast.status, 'group_uuid'):
+                    # Finde alle Geräte mit der gleichen Gruppen-UUID
+                    members = []
+                    group_uuid = self.selected_cast.status.group_uuid
+
+                    for uuid, service in self._found_devices.items():
+                        if hasattr(service, 'group_uuid') and service.group_uuid == group_uuid:
+                            members.append(service.friendly_name)
+
+                    return members
+
+            return [self.selected_cast.name]  # Kein Gruppe, nur einzelnes Gerät
+
+        except Exception as e:
+            print(f"✗ Fehler beim Abrufen der Gruppen-Mitglieder: {e}")
+            return []
+
     def disconnect(self):
         if self.selected_cast:
             self.selected_cast.disconnect()
@@ -1243,22 +1492,52 @@ class VideoPlayer(Gtk.Box):
         self.video_widget.set_content_fit(Gtk.ContentFit.COVER)
         self.video_widget.set_hexpand(True)
 
-        # Video-Equalizer (videobalance)
+        # Video-Effekte-Pipeline
+        # videobalance für Helligkeit, Kontrast, Sättigung, Farbton
         self.videobalance = Gst.ElementFactory.make("videobalance", "balance")
+
+        # gamma für Gamma-Korrektur
+        self.gamma = Gst.ElementFactory.make("gamma", "gamma")
+
+        # videoflip für Rotation und Spiegelung
+        self.videoflip = Gst.ElementFactory.make("videoflip", "flip")
+
+        # videocrop für Zuschneiden
+        self.videocrop = Gst.ElementFactory.make("videocrop", "crop")
+
+        # videoscale für Zoom
+        self.videoscale = Gst.ElementFactory.make("videoscale", "scale")
+
+        # capsfilter für Zoom-Kontrolle
+        self.zoom_capsfilter = Gst.ElementFactory.make("capsfilter", "zoomcaps")
+
         self.videoconvert = Gst.ElementFactory.make("videoconvert", "convert")
+        self.videoconvert2 = Gst.ElementFactory.make("videoconvert", "convert2")
 
         # Video-Sink für GTK
         self.gtksink = Gst.ElementFactory.make("gtk4paintablesink", "sink")
 
-        # Erstelle bin mit videobalance -> videoconvert -> gtksink
+        # Erstelle bin mit Effekte-Kette: videobalance -> gamma -> videoflip -> videoscale -> zoom_capsfilter -> videocrop -> videoconvert -> gtksink
         video_bin = Gst.Bin.new("video_bin")
         video_bin.add(self.videobalance)
+        video_bin.add(self.gamma)
         video_bin.add(self.videoconvert)
+        video_bin.add(self.videoflip)
+        video_bin.add(self.videoscale)
+        video_bin.add(self.zoom_capsfilter)
+        video_bin.add(self.videocrop)
+        video_bin.add(self.videoconvert2)
         video_bin.add(self.gtksink)
 
-        # Verknüpfe Elemente
-        self.videobalance.link(self.videoconvert)
-        self.videoconvert.link(self.gtksink)
+        # Verknüpfe Elemente in der Reihenfolge
+        self.videobalance.link(self.gamma)
+        self.gamma.link(self.videoconvert)
+        self.videoconvert.link(self.videoflip)
+        self.videoflip.link(self.videoscale)
+        self.videoscale.link(self.zoom_capsfilter)
+        self.zoom_capsfilter.link(self.videocrop)
+        self.videocrop.link(self.videoconvert2)
+        self.videoconvert2.link(self.gtksink)
 
         # Erstelle Ghost-Pad für Eingang
         sink_pad = self.videobalance.get_static_pad("sink")
@@ -1269,13 +1548,24 @@ class VideoPlayer(Gtk.Box):
         self.video_widget.set_paintable(paintable)
         self.playbin.set_property("video-sink", video_bin)
 
-        # Standard-Equalizer-Werte
+        # Standard-Equalizer-Werte und Video-Effekte
         self.equalizer_settings = {
             'brightness': 0.0,
             'contrast': 1.0,
             'saturation': 1.0,
-            'hue': 0.0
+            'hue': 0.0,
+            'gamma': 1.0,
+            'rotation': 0,  # 0=none, 1=90°cw, 2=180°, 3=90°ccw, 4=horizontal-flip, 5=vertical-flip
+            'zoom': 1.0,
+            'crop_left': 0,
+            'crop_right': 0,
+            'crop_top': 0,
+            'crop_bottom': 0
         }
+
+        # Original Video-Dimensionen für Crop/Zoom
+        self.original_video_width = 0
+        self.original_video_height = 0
 
         self.append(self.video_widget)
 
@@ -1297,6 +1587,21 @@ class VideoPlayer(Gtk.Box):
             "codec": "N/A",
             "bitrate": "N/A"
         }
+        self._streams_info_updated_for_current_video = False
+
+        self.thumbnail_cache = {}
+        self.setup_performance_optimizations()
+
+    def setup_performance_optimizations(self):
+        """Setzt Performance-Optimierungen"""
+        pass
+    def setup_element(self, element, name):
+        """Helper function to create and check for GStreamer elements."""
+        elem = Gst.ElementFactory.make(name, None)
+        if not elem:
+            print(f"Failed to create GStreamer element: {name}")
+        return elem
+
 
     def setup_hardware_acceleration(self):
         """Konfiguriert Hardware-Beschleunigung (AMD VA-API / NVIDIA NVDEC)"""
@@ -1351,6 +1656,19 @@ class VideoPlayer(Gtk.Box):
 
     def load_video(self, filepath):
         """Lädt eine Video-Datei"""
+        #clear cache
+        self.thumbnail_cache.clear()
+        self.last_thumbnail_position = None
+
+        # Cleanup alte Thumbnail-Pipeline
+        if hasattr(self, 'thumbnail_pipeline') and self.thumbnail_pipeline:
+            try:
+                self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                self.thumbnail_pipeline = None
+                self.thumbnail_appsink = None
+            except:
+                pass
+
         # Setze Video-Infos für neue Datei/Stream zurück
         self._video_info = {
             "resolution": "N/A",
@@ -1387,6 +1705,15 @@ class VideoPlayer(Gtk.Box):
 
     def stop(self):
         self.playbin.set_state(Gst.State.NULL)
+
+        # Cleanup Thumbnail-Pipeline
+        if hasattr(self, 'thumbnail_pipeline') and self.thumbnail_pipeline:
+            try:
+                self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                self.thumbnail_pipeline = None
+                self.thumbnail_appsink = None
+            except:
+                pass
 
     def set_playback_rate(self, rate):
         """Setzt die Wiedergabegeschwindigkeit (0.5 = halbe, 2.0 = doppelte Geschwindigkeit)"""
@@ -1484,6 +1811,87 @@ class VideoPlayer(Gtk.Box):
             traceback.print_exc()
             return False
 
+    def extract_video_thumbnail(self, video_path, thumbnail_path, width=80, height=60):
+        """Extrahiert ein Thumbnail aus einem Video für die Playlist"""
+        try:
+            # Cache-Verzeichnis erstellen falls nicht vorhanden
+            cache_dir = os.path.dirname(thumbnail_path)
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+
+            # Prüfe ob Thumbnail bereits existiert
+            if os.path.exists(thumbnail_path):
+                return True
+
+            # Verwende ffmpeg für schnellere und zuverlässigere Thumbnail-Extraktion
+            try:
+                import subprocess
+                # Extrahiere Frame bei 5 Sekunden
+                cmd = [
+                    'ffmpeg', '-y', '-ss', '5', '-i', video_path,
+                    '-vframes', '1', '-vf', f'scale={width}:{height}',
+                    thumbnail_path
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=3)
+
+                if result.returncode == 0 and os.path.exists(thumbnail_path):
+                    return True
+            except Exception as e:
+                print(f"ffmpeg Thumbnail-Extraktion fehlgeschlagen: {e}")
+
+            # Fallback: Nutze GStreamer falls ffmpeg nicht verfügbar
+            try:
+                # Erstelle einen temporären Pipeline für Thumbnail-Extraktion
+                pipeline_str = f'filesrc location="{video_path}" ! decodebin ! videoconvert ! videoscale ! video/x-raw,width={width},height={height} ! jpegenc ! filesink location="{thumbnail_path}"'
+
+                pipeline = Gst.parse_launch(pipeline_str)
+                bus = pipeline.get_bus()
+
+                # Setze Pipeline auf PAUSED
+                pipeline.set_state(Gst.State.PAUSED)
+
+                # Warte auf PAUSED State mit Timeout
+                ret = pipeline.get_state(3 * Gst.SECOND)
+                if ret[0] == Gst.StateChangeReturn.SUCCESS or ret[0] == Gst.StateChangeReturn.ASYNC:
+                    # Seek zu 5 Sekunden
+                    pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 5 * Gst.SECOND)
+
+
+                    # Kurz abspielen und dann stoppen
+                    pipeline.set_state(Gst.State.PLAYING)
+
+                    # Warte auf EOS oder ERROR mit Timeout
+                    bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+
+                    # Cleanup
+
+                    pipeline.set_state(Gst.State.NULL)
+
+                    if os.path.exists(thumbnail_path):
+                        return True
+                else:
+                    pipeline.set_state(Gst.State.NULL)
+
+            except Exception as e:
+                print(f"GStreamer Thumbnail-Extraktion fehlgeschlagen: {e}")
+
+            return False
+
+        except Exception as e:
+            print(f"Fehler beim Extrahieren des Thumbnails für {video_path}: {e}")
+            return False
+
+    def get_thumbnail_path(self, video_path):
+        """Gibt den Pfad zum Thumbnail zurück (verwendet MD5 Hash des Pfads)"""
+        # Erstelle eindeutigen Hash für Video-Pfad
+        hash_obj = hashlib.md5(video_path.encode())
+        hash_str = hash_obj.hexdigest()
+
+        # Cache-Verzeichnis
+        cache_dir = os.path.expanduser("~/.cache/gnome-chromecast-player/thumbnails")
+
+        return os.path.join(cache_dir, f"{hash_str}.jpg")
+
     def set_equalizer(self, brightness=None, contrast=None, saturation=None, hue=None):
         """Setzt Video-Equalizer-Werte (brightness: -1 bis 1, contrast: 0 bis 2, saturation: 0 bis 2, hue: -1 bis 1)"""
         if brightness is not None:
@@ -1519,57 +1927,209 @@ class VideoPlayer(Gtk.Box):
         self.set_equalizer(brightness=0.0, contrast=1.0, saturation=1.0, hue=0.0)
         print("Equalizer zurückgesetzt")
 
+    def set_gamma(self, gamma):
+        """Setzt Gamma-Korrektur (0.01 bis 10.0, Standard: 1.0)"""
+        gamma = max(0.01, min(10.0, gamma))
+        self.gamma.set_property("gamma", gamma)
+        self.equalizer_settings['gamma'] = gamma
+        print(f"Gamma: {gamma}")
+
+    def set_rotation(self, rotation):
+        """Setzt Video-Rotation und Spiegelung
+
+        Args:
+            rotation (int):
+                0 = none (identity)
+                1 = 90° im Uhrzeigersinn (clockwise)
+                2 = 180° (rotate-180)
+                3 = 90° gegen Uhrzeigersinn (counterclockwise)
+                4 = horizontal spiegeln (horizontal-flip)
+                5 = vertikal spiegeln (vertical-flip)
+                6 = obere linke Diagonale (upper-left-diagonal)
+                7 = obere rechte Diagonale (upper-right-diagonal)
+        """
+        rotation = max(0, min(7, rotation))
+        self.videoflip.set_property("method", rotation)
+        self.equalizer_settings['rotation'] = rotation
+        rotation_names = ["Keine", "90° CW", "180°", "90° CCW", "Horizontal", "Vertikal", "Diag↖", "Diag↗"]
+        print(f"Rotation: {rotation_names[rotation]}")
+
+    def set_zoom(self, zoom):
+        """Setzt Zoom-Faktor (0.5 bis 5.0, Standard: 1.0)"""
+        zoom = max(0.5, min(5.0, zoom))
+        self.equalizer_settings['zoom'] = zoom
+
+        # Zoom wird über capsfilter implementiert - Scale auf gewünschte Größe
+        if self.original_video_width > 0 and self.original_video_height > 0:
+            target_width = int(self.original_video_width * zoom)
+            target_height = int(self.original_video_height * zoom)
+
+            # Stelle sicher, dass die Dimensionen gerade sind, um GDK-Texturfehler zu vermeiden.
+            # GDK kann bei einigen Formaten (wie I420) Probleme mit ungeraden Dimensionen haben.
+            even_width = (target_width // 2) * 2
+            even_height = (target_height // 2) * 2
+
+            caps = Gst.Caps.from_string(f"video/x-raw,width={even_width},height={even_height}")
+            self.zoom_capsfilter.set_property("caps", caps)
+            print(f"Zoom: {zoom}x ({even_width}x{even_height})")
+        else:
+            print(f"Zoom: {zoom}x (warte auf Video-Dimensionen)")
+
+    def set_crop(self, left=0, right=0, top=0, bottom=0):
+        """Setzt Crop-Werte (in Pixeln von jeder Seite)
+
+        Args:
+            left (int): Pixel von links abschneiden
+            right (int): Pixel von rechts abschneiden
+            top (int): Pixel von oben abschneiden
+            bottom (int): Pixel von unten abschneiden
+        """
+        self.videocrop.set_property("left", max(0, left))
+        self.videocrop.set_property("right", max(0, right))
+        self.videocrop.set_property("top", max(0, top))
+        self.videocrop.set_property("bottom", max(0, bottom))
+
+        self.equalizer_settings['crop_left'] = left
+        self.equalizer_settings['crop_right'] = right
+        self.equalizer_settings['crop_top'] = top
+        self.equalizer_settings['crop_bottom'] = bottom
+
+        if left > 0 or right > 0 or top > 0 or bottom > 0:
+            print(f"Crop: L={left} R={right} T={top} B={bottom}")
+        else:
+            print("Crop: Deaktiviert")
+
+    def reset_video_effects(self):
+        """Setzt alle Video-Effekte auf Standard zurück"""
+        self.reset_equalizer()
+        self.set_gamma(1.0)
+        self.set_rotation(0)
+        self.set_zoom(1.0)
+        self.set_crop(0, 0, 0, 0)
+        print("Alle Video-Effekte zurückgesetzt")
+
+    def apply_filter_preset(self, preset_name):
+        """Wendet vordefinierte Filter-Presets an
+
+        Args:
+            preset_name (str): 'normal', 'sepia', 'grayscale', 'vintage', 'vivid', 'dark', 'bright'
+        """
+        presets = {
+            'normal': {
+                'brightness': 0.0, 'contrast': 1.0, 'saturation': 1.0, 'hue': 0.0, 'gamma': 1.0
+            },
+            'sepia': {
+                'brightness': 0.1, 'contrast': 1.1, 'saturation': 0.4, 'hue': 0.15, 'gamma': 1.2
+            },
+            'grayscale': {
+                'brightness': 0.0, 'contrast': 1.0, 'saturation': 0.0, 'hue': 0.0, 'gamma': 1.0
+            },
+            'blackwhite': {
+                'brightness': 0.2, 'contrast': 1.5, 'saturation': 0.0, 'hue': 0.0, 'gamma': 1.0
+            },
+            'vintage': {
+                'brightness': 0.05, 'contrast': 1.2, 'saturation': 0.7, 'hue': 0.1, 'gamma': 1.3
+            },
+            'vivid': {
+                'brightness': 0.1, 'contrast': 1.3, 'saturation': 1.5, 'hue': 0.0, 'gamma': 0.9
+            },
+            'dark': {
+                'brightness': -0.3, 'contrast': 1.2, 'saturation': 1.0, 'hue': 0.0, 'gamma': 1.5
+            },
+            'bright': {
+                'brightness': 0.3, 'contrast': 0.9, 'saturation': 1.1, 'hue': 0.0, 'gamma': 0.8
+            },
+            'cold': {
+                'brightness': 0.0, 'contrast': 1.1, 'saturation': 1.2, 'hue': -0.2, 'gamma': 1.0
+            },
+            'warm': {
+                'brightness': 0.05, 'contrast': 1.0, 'saturation': 1.2, 'hue': 0.2, 'gamma': 1.1
+            }
+        }
+
+        if preset_name in presets:
+            preset = presets[preset_name]
+            self.set_equalizer(
+                brightness=preset['brightness'],
+                contrast=preset['contrast'],
+                saturation=preset['saturation'],
+                hue=preset['hue']
+            )
+            self.set_gamma(preset['gamma'])
+            print(f"Filter-Preset angewendet: {preset_name}")
+        else:
+            print(f"Unbekanntes Preset: {preset_name}")
+
+    def _init_thumbnail_pipeline(self):
+        """Initialisiert eine wiederverwendbare Pipeline für Thumbnails"""
+        try:
+            if hasattr(self, 'thumbnail_pipeline') and self.thumbnail_pipeline:
+                self.thumbnail_pipeline.set_state(Gst.State.NULL)
+
+            pipeline_str = f'uridecodebin uri="{self.current_uri}" ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=160,height=90 ! appsink name=sink sync=false'
+
+            self.thumbnail_pipeline = Gst.parse_launch(pipeline_str)
+            self.thumbnail_appsink = self.thumbnail_pipeline.get_by_name('sink')
+
+            # Konfiguriere den appsink für schnelle Extraktion
+            self.thumbnail_appsink.set_property('emit-signals', False)
+            self.thumbnail_appsink.set_property('max-buffers', 1)
+            self.thumbnail_appsink.set_property('drop', True)
+
+            # Setze Pipeline in PAUSED state (nur einmal!)
+            self.thumbnail_pipeline.set_state(Gst.State.PAUSED)
+
+            # Warte bis bereit (nur beim ersten Mal)
+            ret = self.thumbnail_pipeline.get_state(3 * Gst.SECOND)
+            if ret[0] != Gst.StateChangeReturn.SUCCESS:
+                self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                self.thumbnail_pipeline = None
+                return False
+
+            return True
+        except Exception as e:
+            print(f"Fehler beim Initialisieren der Thumbnail-Pipeline: {e}")
+            self.thumbnail_pipeline = None
+            return False
+
     def get_frame_at_position(self, position_seconds):
         """Extrahiert ein Frame an einer bestimmten Position als Pixbuf für Thumbnails
 
-        Verwendet eine separate Pipeline für präzises Frame-Extraction ohne
-        die Hauptwiedergabe zu stören.
+        Verwendet eine wiederverwendbare Pipeline für schnelles Frame-Extraction.
         """
         try:
-            # Erstelle eine temporäre Pipeline nur für diesen Frame
-            # Dies verhindert, dass wir die Hauptwiedergabe unterbrechen müssen
-            pipeline_str = f'uridecodebin uri="{self.current_uri}" ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=160,height=90 ! appsink name=sink sync=false'
+            # Stelle sicher, dass Pipeline initialisiert ist
+            if not hasattr(self, 'thumbnail_pipeline') or not self.thumbnail_pipeline:
+                if not self._init_thumbnail_pipeline():
+                    return None
 
-            thumbnail_pipeline = Gst.parse_launch(pipeline_str)
-            appsink = thumbnail_pipeline.get_by_name('sink')
+            # Schnelles Seek - nur KEY_UNIT für Performance
+            seek_flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
+            position_ns = int(position_seconds * Gst.SECOND)
 
-            # Konfiguriere den appsink
-            appsink.set_property('emit-signals', False)
-            appsink.set_property('max-buffers', 1)
-            appsink.set_property('drop', True)
-
-            # Setze Pipeline in PAUSED state
-            thumbnail_pipeline.set_state(Gst.State.PAUSED)
-
-            # Warte bis Pipeline bereit ist
-            ret = thumbnail_pipeline.get_state(5 * Gst.SECOND)
-            if ret[0] != Gst.StateChangeReturn.SUCCESS:
-                thumbnail_pipeline.set_state(Gst.State.NULL)
-                return None
-
-            # Seek zur gewünschten Position
-            seek_flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE | Gst.SeekFlags.KEY_UNIT
-            position_ns = position_seconds * Gst.SECOND
-
-            thumbnail_pipeline.seek_simple(
+            success = self.thumbnail_pipeline.seek_simple(
                 Gst.Format.TIME,
                 seek_flags,
                 position_ns
             )
 
-            # Warte auf Seek-Completion
-            bus = thumbnail_pipeline.get_bus()
+            if not success:
+                return None
+
+            # Kurzes Warten auf Seek (reduziert von 2s auf 0.5s)
+            bus = self.thumbnail_pipeline.get_bus()
             msg = bus.timed_pop_filtered(
-                2 * Gst.SECOND,
+                int(0.5 * Gst.SECOND),
                 Gst.MessageType.ASYNC_DONE | Gst.MessageType.ERROR
             )
 
             if not msg or msg.type == Gst.MessageType.ERROR:
-                thumbnail_pipeline.set_state(Gst.State.NULL)
+                # Bei Fehler Pipeline neu initialisieren
+                self._init_thumbnail_pipeline()
                 return None
 
             # Hole Sample vom appsink
-            sample = appsink.emit('pull-preroll')
+            sample = self.thumbnail_appsink.emit('pull-preroll')
 
             if sample:
                 buffer = sample.get_buffer()
@@ -1596,23 +2156,20 @@ class VideoPlayer(Gtk.Box):
                             width * 3
                         )
 
-                        # Pipeline aufräumen
                         buffer.unmap(map_info)
-                        thumbnail_pipeline.set_state(Gst.State.NULL)
-
                         return pixbuf
 
                     except Exception as e:
                         buffer.unmap(map_info)
                         print(f"Fehler beim Pixbuf-Erstellen: {e}")
 
-            # Pipeline aufräumen
-            thumbnail_pipeline.set_state(Gst.State.NULL)
-
         except Exception as e:
             print(f"Fehler beim Thumbnail-Erstellen: {e}")
-            import traceback
-            traceback.print_exc()
+            # Bei Fehler Pipeline neu initialisieren
+            try:
+                self._init_thumbnail_pipeline()
+            except:
+                pass
 
         return None
 
@@ -1800,6 +2357,10 @@ class VideoPlayer(Gtk.Box):
                                     # Nur aktualisieren, wenn es ein gültiger Wert ist
                                     self._video_info["resolution"] = f"{width}x{height}"
 
+                                    # Speichere Original-Dimensionen für Crop/Zoom
+                                    self.original_video_width = width
+                                    self.original_video_height = height
+
                 # 2. Codec aus den Tags extrahieren
                 success, value = taglist.get_string(Gst.TAG_VIDEO_CODEC)
                 if success:
@@ -1889,17 +2450,18 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.setup_header_bar()
 
         # Content Box
-        content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        content_box.set_margin_start(12)
-        content_box.set_margin_end(12)
-        content_box.set_margin_top(12)
-        content_box.set_margin_bottom(12)
+        self.content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.content_box.set_margin_start(12)
+        self.content_box.set_margin_end(12)
+        self.content_box.set_margin_top(12)
+        self.content_box.set_margin_bottom(12)
 
         # Video Player und Info-Overlay
         self.video_overlay = Gtk.Overlay()
-        content_box.append(self.video_overlay)
+        self.content_box.append(self.video_overlay)
 
         self.video_player = VideoPlayer()
+
         self.video_overlay.set_child(self.video_player)
 
         self.info_label = Gtk.Label()
@@ -1913,9 +2475,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Seitenleiste für Chromecast
         self.setup_sidebar()
-        content_box.append(self.sidebar)
+        self.content_box.append(self.sidebar)
 
-        self.main_box.append(content_box)
+        self.main_box.append(self.content_box)
 
         # Timeline/Seek Bar
         self.timeline_widget = self.setup_timeline()
@@ -1933,9 +2495,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Timeline state tracking
         self.timeline_update_timeout = None
         self.is_seeking = False
-        self.timeline_seek_handler_id = 0
+        self.timeline_seek_handler_id = None
         self.info_overlay_timeout_id = None
         self.info_overlay_shown_for_current_video = False
+        self.thumbnail_hover_timeout_id = None
 
         # Initialisiere Lautstärke
         saved_volume = self.config.get_setting("volume", 1.0)
@@ -1944,6 +2507,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Setze EOS-Callback für Auto-Advance
         self.video_player.eos_callback = self.on_video_ended
+
+        # Setze Info-Callback
+        # Doppelklick-Geste für Vollbildmodus
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.set_button(1) # Linke Maustaste
+        click_gesture.connect("pressed", self.on_video_area_click)
+        self.video_player.add_controller(click_gesture)
+
 
         # Setze Info-Callback
         self.video_player.info_callback = self.show_video_info
@@ -2254,6 +2825,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.equalizer_button.set_popover(self.equalizer_popover)
         header.pack_end(self.equalizer_button)
 
+        # Video-Effekte-Button
+        self.effects_button = Gtk.MenuButton()
+        self.effects_button.set_icon_name("video-display-symbolic")
+        self.effects_button.set_tooltip_text("Video-Effekte")
+        self.effects_button.set_sensitive(False) # Deaktiviert bis Video geladen
+
+        # Erstelle Effekte-Popover
+        self.effects_popover = self.create_effects_popover()
+        self.effects_button.set_popover(self.effects_popover)
+        header.pack_end(self.effects_button)
+
         # Vollbild-Button
         self.fullscreen_button = Gtk.Button()
         self.fullscreen_button.set_icon_name("view-fullscreen-symbolic")
@@ -2376,6 +2958,65 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.status_label.add_css_class("dim-label")
         chromecast_section.append(self.status_label)
 
+        # Erweiterte Status-Anzeige (ausklappbar)
+        self.chromecast_expander = Gtk.Expander()
+        self.chromecast_expander.set_label("Erweiterte Informationen")
+        self.chromecast_expander.set_visible(False)  # Nur sichtbar wenn verbunden
+
+        # Status-Details Box
+        status_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        status_details_box.set_margin_top(6)
+        status_details_box.set_margin_bottom(6)
+
+        # Device Info
+        self.cc_device_label = Gtk.Label(label="Gerät: -")
+        self.cc_device_label.set_xalign(0)
+        self.cc_device_label.add_css_class("caption")
+        status_details_box.append(self.cc_device_label)
+
+        self.cc_model_label = Gtk.Label(label="Modell: -")
+        self.cc_model_label.set_xalign(0)
+        self.cc_model_label.add_css_class("caption")
+        status_details_box.append(self.cc_model_label)
+
+        # App Info
+        self.cc_app_label = Gtk.Label(label="App: -")
+        self.cc_app_label.set_xalign(0)
+        self.cc_app_label.add_css_class("caption")
+        status_details_box.append(self.cc_app_label)
+
+        # Playback Status
+        self.cc_state_label = Gtk.Label(label="Status: IDLE")
+        self.cc_state_label.set_xalign(0)
+        self.cc_state_label.add_css_class("caption")
+        status_details_box.append(self.cc_state_label)
+
+        # Media Info
+        self.cc_media_label = Gtk.Label(label="Media: -")
+        self.cc_media_label.set_xalign(0)
+        self.cc_media_label.add_css_class("caption")
+        self.cc_media_label.set_wrap(True)
+        self.cc_media_label.set_max_width_chars(30)
+        status_details_box.append(self.cc_media_label)
+
+        # Buffer Status
+        self.cc_buffer_label = Gtk.Label(label="Puffer: 0%")
+        self.cc_buffer_label.set_xalign(0)
+        self.cc_buffer_label.add_css_class("caption")
+        status_details_box.append(self.cc_buffer_label)
+
+        # Group Members (if applicable)
+        self.cc_group_label = Gtk.Label(label="")
+        self.cc_group_label.set_xalign(0)
+        self.cc_group_label.add_css_class("caption")
+        self.cc_group_label.set_wrap(True)
+        self.cc_group_label.set_max_width_chars(30)
+        self.cc_group_label.set_visible(False)
+        status_details_box.append(self.cc_group_label)
+
+        self.chromecast_expander.set_child(status_details_box)
+        chromecast_section.append(self.chromecast_expander)
+
         self.sidebar.append(chromecast_section)
 
     def setup_timeline(self):
@@ -2399,6 +3040,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.timeline_scale.set_draw_value(False)
         self.timeline_scale.set_sensitive(False)  # Deaktiviert bis Video geladen
 
+        # Handler für das Klicken auf die Leiste (ohne Ziehen)
+        self.timeline_seek_handler_id = self.timeline_scale.connect("value-changed", self.on_timeline_seek)
+
         # Verwende GestureDrag, um den Start und das Ende des Ziehens zuverlässig zu erkennen
         drag_gesture = Gtk.GestureDrag.new()
         drag_gesture.set_button(1)  # Nur auf linke Maustaste reagieren
@@ -2406,9 +3050,18 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         drag_gesture.connect("drag-end", self.on_timeline_drag_end)
         self.timeline_scale.add_controller(drag_gesture)
 
+
         # Variablen für Thumbnail-Caching
         self.thumbnail_cache = {}
         self.last_thumbnail_position = None
+        self.thumbnail_load_in_progress = False
+        self.thumbnail_load_cancellable = None
+
+        # Thread-Queue für asynchrone Thumbnail-Generierung
+        self.thumbnail_queue = Queue()
+        self.thumbnail_thread = None
+        self.thumbnail_thread_running = False
+        self._start_thumbnail_worker()
 
         # Verwende Overlay um Motion-Events zuverlässig zu erfassen
         # während Click/Drag-Events zum Scale durchgereicht werden
@@ -2489,15 +3142,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Slider aktualisieren
         if duration > 0:
             percentage = (position / duration) * 100.0
-            # Blockiere das 'value-changed' Signal, um die Seek-Schleife zu verhindern.
-            # Wir verwenden die korrekte Methode, um den Handler zu blockieren/freizugeben.
-            # Der Handler wird in on_timeline_drag_begin verbunden.
-            with self.timeline_scale.freeze_notify():
-                if self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
-                    self.timeline_scale.handler_block(self.timeline_seek_handler_id)
+            # Blockiere das 'value-changed' Signal, um eine Endlosschleife zu verhindern,
+            # aber nur, wenn der Handler gültig ist.
+            if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+                self.timeline_scale.handler_block(self.timeline_seek_handler_id)
                 self.timeline_scale.set_value(percentage)
-                if self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
-                    self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
+                self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
+
             if not self.timeline_scale.get_sensitive():
                 self.timeline_scale.set_sensitive(True)
         else:
@@ -2506,6 +3157,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Überprüfe A-B Loop
         self.check_ab_loop()
+
+        # Update Chromecast Status-Anzeige (nur im Chromecast-Modus)
+        if self.play_mode == "chromecast":
+            self.update_chromecast_status_display()
 
         return True  # Timeout fortsetzen
 
@@ -2542,6 +3197,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Springt zu einer bestimmten Position im Video"""
         if self.play_mode == "local":
             self.video_player.seek(position)
+
+            # Aktualisiere Timeline-Slider sofort
+            duration = self.get_current_duration()
+            if duration and duration > 0:
+                progress = (position / duration) * 100.0
+                # Blockiere Handler während wir den Wert setzen
+                if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+                    self.timeline_scale.handler_block(self.timeline_seek_handler_id)
+                self.timeline_scale.set_value(progress)
+                if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+                    self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
+
+                # Aktualisiere auch das Zeit-Label
+                self.time_label.set_text(self.format_time(position))
         else:
             self.cast_manager.seek(position)
         print(f"Gesprungen zu Position: {self.format_time(position)}")
@@ -2560,24 +3229,31 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_timeline_drag_begin(self, gesture, start_x, start_y):
         """Wird aufgerufen, wenn der Benutzer beginnt, den Slider zu ziehen."""
         self.is_seeking = True
-        # Verbinde den Handler nur während des Ziehens und speichere die ID
-        self.timeline_seek_handler_id = self.timeline_scale.connect("value-changed", self.on_timeline_seek)
+        if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+            self.timeline_scale.handler_block(self.timeline_seek_handler_id)
         print("Timeline seeking started")
 
     def on_timeline_drag_end(self, gesture, offset_x, offset_y):
         """Wird aufgerufen, wenn der Benutzer das Ziehen des Sliders beendet."""
+        # Führe den finalen Seek-Vorgang an der Endposition aus
+        self.on_timeline_seek(self.timeline_scale)
         self.is_seeking = False
         print("Timeline seeking ended")
-        self.timeline_scale.handler_disconnect(self.timeline_seek_handler_id)
+        if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+            self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
         # Setze die Position zurück, um ein sofortiges Thumbnail-Update beim nächsten Hover zu erzwingen
         self.last_thumbnail_position = None
         # Verstecke das Popover, falls es noch offen ist
         self.thumbnail_popover.popdown()
 
     def on_timeline_seek(self, scale):
-        """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt."""
+        """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt oder klickt."""
         duration = self.get_current_duration()
-        if duration > 0:
+
+        # Führe Seek nur aus, wenn der Benutzer aktiv sucht (zieht) oder klickt.
+        # Dies verhindert, dass die programmgesteuerte Aktualisierung in update_timeline()
+        # einen Seek-Vorgang auslöst.
+        if duration > 0 and self.is_seeking:
             value = scale.get_value()
             position_seconds = (value / 100.0) * duration
             self.perform_seek(position_seconds)
@@ -2585,128 +3261,242 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.time_label.set_text(self.format_time(position_seconds))
         return False  # Erlaube dem Signal, weiter zu laufen
 
+
     def on_timeline_enter(self, controller, _x, _y):
         """Wird aufgerufen, wenn die Maus die Timeline betritt."""
         pass
 
     def on_timeline_hover(self, controller, x, y):
         """Wird aufgerufen, wenn die Maus über die Timeline schwebt."""
-        # print(f"Timeline hover at ({x:.1f}, {y:.1f})") # Zu gesprächig für normale Logs
-
-        # Nur im lokalen Modus und wenn Video geladen ist
+        # Nur im lokalen Modus
         if self.play_mode != "local" or not self.timeline_scale.get_sensitive():
-            # print("  -> Skipped: wrong mode or not sensitive")
             return
 
-        # Kein Thumbnail anzeigen während gezogen wird
-        if self.is_seeking:
-            # print("  -> Skipped: seeking")
-            return
-
+        # Berechne Position für Zeit-Label und Popover-Position
         duration = self.get_current_duration()
         if not duration or duration <= 0:
-            # print("  -> Skipped: no duration")
             return
 
-        # Berechne die Position präzise, indem wir das Gtk.Scale-Widget selbst fragen,
-        # welchem Wert die Mausposition entspricht. Dies vermeidet Abweichungen durch
-        # internes Padding des Widgets.
-        # Wir verwenden hierfür ein internes, undokumentiertes Signal.
-        hover_position = None # Initialisieren
         try:
             value = self.timeline_scale.emit("get-value-for-pos", x, y)
             hover_position = (value / 100.0) * duration
         except TypeError:
-            # Fallback, falls das Signal nicht existiert oder fehlschlägt
             widget_width = self.timeline_scale.get_width()
             progress = max(0.0, min(1.0, x / widget_width)) if widget_width > 0 else 0
             hover_position = progress * duration
 
-        # Stelle sicher, dass hover_position einen Wert hat
-        if hover_position is None:
-            print("  -> Skipped: hover_position konnte nicht berechnet werden.")
-            return
-
-        # Nur aktualisieren, wenn Position sich deutlich geändert hat (mindestens 2 Sekunden)
-        if self.last_thumbnail_position is not None:
-            if abs(hover_position - self.last_thumbnail_position) < 2.0:
-                # print(f"  -> Skipped: position change too small ({abs(hover_position - self.last_thumbnail_position):.1f}s)")
-                return
-
-        self.last_thumbnail_position = hover_position
-        print(f"  -> Showing thumbnail at {hover_position:.1f}s")
-
-        # Zeige Zeit-Label
-        self.thumbnail_time_label.set_text(self.format_time(hover_position))
-
-        # Prüfe ob Thumbnail im Cache ist (in 5-Sekunden-Schritten)
-        cache_key = int(hover_position / 5) * 5
-
-        if cache_key in self.thumbnail_cache:
-            # Verwende gecachtes Thumbnail
-            print(f"  -> Using cached thumbnail for {cache_key}s")
-            pixbuf = self.thumbnail_cache.get(cache_key)
-            if not pixbuf:
-                # Sollte nicht passieren, aber zur Sicherheit
-                GLib.idle_add(self.load_thumbnail_async, hover_position, cache_key)
-                return
-            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-            self.thumbnail_image.set_paintable(texture)
-        else:
-            # Lade Thumbnail asynchron
-            print(f"  -> Loading new thumbnail for {cache_key}s")
-            GLib.idle_add(self.load_thumbnail_async, hover_position, cache_key)
-
-        # Positioniere und zeige Popover
+        # Aktualisiere Position und Zeit SOFORT (kein Debounce)
         rect = Gdk.Rectangle()
         rect.x = int(x)
         rect.y = int(y)
         rect.width = 1
         rect.height = 1
         self.thumbnail_popover.set_pointing_to(rect)
+        self.thumbnail_time_label.set_text(self.format_time(hover_position))
 
-        self.thumbnail_popover.popup()
-        print(f"  -> Popover shown at ({x:.1f}, {y:.1f})")
+        # Zeige Popover wenn noch nicht sichtbar
+        if not self.thumbnail_popover.get_visible():
+            self.thumbnail_popover.popup()
+
+        # Berechne Maus-Geschwindigkeit (basierend auf Position-Änderung)
+        import time
+        current_time = time.time()
+
+        if not hasattr(self, '_last_hover_time'):
+            self._last_hover_time = current_time
+            self._last_hover_position = hover_position
+
+        time_delta = current_time - self._last_hover_time
+        position_delta = abs(hover_position - self._last_hover_position)
+
+        # Berechne Geschwindigkeit (Sekunden pro Sekunde Zeitdelta)
+        velocity = position_delta / time_delta if time_delta > 0 else 0
+
+        self._last_hover_time = current_time
+        self._last_hover_position = hover_position
+
+        # Nur Thumbnails laden wenn Maus langsam (< 50 Sekunden/Sekunde)
+        # Bei schneller Bewegung: nur Position/Zeit updaten, kein Thumbnail
+        if velocity < 50:
+            # Längerer Debounce für Thumbnail-Update (500ms statt 300ms)
+            new_id = GLib.timeout_add(500, self._update_thumbnail_popover, x, y)
+            self.thumbnail_hover_timeout_id = new_id
+
+    def _update_thumbnail_popover(self, x, y):
+        """Interne Funktion, die nur das Thumbnail aktualisiert (nicht die Position)."""
+
+        # Kein Thumbnail anzeigen während gezogen wird
+        if self.is_seeking:
+            return False
+
+        duration = self.get_current_duration()
+        if not duration or duration <= 0:
+            return False
+
+        # Berechne Position
+        try:
+            value = self.timeline_scale.emit("get-value-for-pos", x, y)
+            hover_position = (value / 100.0) * duration
+        except TypeError:
+            widget_width = self.timeline_scale.get_width()
+            progress = max(0.0, min(1.0, x / widget_width)) if widget_width > 0 else 0
+            hover_position = progress * duration
+
+        # Prüfe ob Thumbnail im Cache ist (in 15-Sekunden-Schritten für weniger Flackern)
+        cache_key = int(hover_position / 15) * 15
+
+        # Nur aktualisieren, wenn wir zu einem anderen Cache-Slot wechseln
+        if self.last_thumbnail_position is not None:
+            last_cache_key = int(self.last_thumbnail_position / 15) * 15
+            if cache_key == last_cache_key:
+                # Gleicher Cache-Slot, kein Update nötig
+                return False
+
+        self.last_thumbnail_position = cache_key  # Speichere Cache-Key, nicht hover_position
+
+        if cache_key in self.thumbnail_cache:
+            # Verwende gecachtes Thumbnail
+            pixbuf = self.thumbnail_cache.get(cache_key)
+            if pixbuf:
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                self.thumbnail_image.set_paintable(texture)
+        else:
+            # Lade Thumbnail asynchron
+            GLib.idle_add(self.load_thumbnail_async, cache_key, cache_key, x, y)
+
+        # Setze die ID zurück
+        self.thumbnail_hover_timeout_id = None
+        return False
 
     def on_timeline_leave(self, controller):
         """Wird aufgerufen, wenn die Maus die Timeline verlässt."""
+        # Lasse Timer einfach ablaufen - setze nur ID zurück
+        self.thumbnail_hover_timeout_id = None
         self.thumbnail_popover.popdown()
         self.last_thumbnail_position = None
-    def load_thumbnail_async(self, position, cache_key):
-        """Lädt Thumbnail asynchron und cached es."""
+
+    def _start_thumbnail_worker(self):
+        """Startet den Background-Worker-Thread für Thumbnail-Generierung"""
+        if self.thumbnail_thread_running:
+            return
+
+        self.thumbnail_thread_running = True
+
+        def worker():
+            """Worker-Thread der Thumbnail-Anfragen aus der Queue verarbeitet"""
+            from queue import Empty
+            while self.thumbnail_thread_running:
+                try:
+                    # Hole nächste Anfrage mit Timeout (nicht-blockierend)
+                    request = self.thumbnail_queue.get(timeout=0.5)
+                    if request is None:  # Shutdown-Signal
+                        break
+
+                    position, cache_key, x, y = request
+
+                    # Generiere Thumbnail (kann länger dauern, blockiert aber nicht die UI)
+                    pixbuf = self.video_player.get_frame_at_position(position)
+
+                    if pixbuf:
+                        # Cache Thumbnail (thread-safe da dict-writes atomar sind in CPython)
+                        self.thumbnail_cache[cache_key] = pixbuf
+
+                        # Update UI im Main-Thread mit Popover-Position
+                        GLib.idle_add(self._display_thumbnail, pixbuf, x, y)
+
+                except Empty:
+                    # Timeout ist normal - einfach weiter warten
+                    continue
+                except Exception as e:
+                    if self.thumbnail_thread_running:  # Nur loggen wenn nicht beim Shutdown
+                        import traceback
+                        print(f"Fehler im Thumbnail-Worker: {e}")
+                        traceback.print_exc()
+
+        self.thumbnail_thread = threading.Thread(target=worker, daemon=True)
+        self.thumbnail_thread.start()
+
+    def _display_thumbnail(self, pixbuf, x, y):
+        """Zeigt ein Thumbnail an (wird im Main-Thread aufgerufen)"""
         try:
-            pixbuf = self.video_player.get_frame_at_position(position)
-            if pixbuf:
-                # Cache Thumbnail
-                self.thumbnail_cache[cache_key] = pixbuf
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self.thumbnail_image.set_paintable(texture)
 
-                # Zeige Thumbnail
-                # Erstelle eine Gdk.Paintable aus dem Pixbuf
-                # Gdk.Texture.new_for_pixbuf() ist veraltet.
-                # Der empfohlene Weg ist, ein Gtk.Image zu verwenden und dessen Paintable zu bekommen,
-                # aber für diesen Fall ist es einfacher, die veraltete Methode vorerst zu behalten.
-                texture = Gdk.Texture.new_for_pixbuf(pixbuf) # Veraltet, aber funktioniert
-                self.thumbnail_image.set_paintable(texture)
+            # Zeige Popover an der Position
+            rect = Gdk.Rectangle()
+            rect.x = int(x)
+            rect.y = int(y)
+            rect.width = 1
+            rect.height = 1
+            self.thumbnail_popover.set_pointing_to(rect)
+            self.thumbnail_popover.popup()
         except Exception as e:
-            print(f"Fehler beim Laden des Thumbnails: {e}")
+            print(f"Fehler beim Anzeigen des Thumbnails: {e}")
+        return False
 
+    def load_thumbnail_async(self, position, cache_key, x, y):
+        """Lädt Thumbnail asynchron über den Worker-Thread"""
+        # Leere die Queue - wir wollen nur das neueste Thumbnail
+        while not self.thumbnail_queue.empty():
+            try:
+                self.thumbnail_queue.get_nowait()
+            except:
+                break
+
+        # Füge neue Anfrage hinzu (mit Position für Popover)
+        self.thumbnail_queue.put((position, cache_key, x, y))
         return False  # Nur einmal ausführen
 
     def perform_seek(self, position_seconds):
+
         """Führt Seek basierend auf Modus aus"""
         print(f"Seeking to {position_seconds:.1f}s (mode: {self.play_mode})")
         if self.play_mode == "local":
             self.video_player.seek(position_seconds)
+
         else:
             # Chromecast-Seeking in Thread ausführen um UI nicht zu blockieren
             if self.cast_manager.mc:
                 def chromecast_seek():
+
                     self.cast_manager.seek(position_seconds)
 
                 thread = threading.Thread(target=chromecast_seek, daemon=True)
                 thread.start()
             else:
                 print("Cannot seek: No Chromecast connection")
+
+    def setup_performance_optimizations(self):
+        """Setzt Performance-Optimierungen"""
+
+        # GStreamer Pipeline optimieren
+        if self.play_mode == "local":
+            # Setze niedrigere Latenz für lokale Wiedergabe
+
+            # 500ms statt 250ms für flüssigere Wiedergabe
+            if self.timeline_update_timeout:
+                GLib.source_remove(self.timeline_update_timeout)
+
+
+            self.timeline_update_timeout = GLib.timeout_add(500, self.update_timeline)
+            print(f"Timeline updates started (500ms interval)")
+
+            # Setze properties für playbin
+            self.video_player.playbin.set_property("video-sink", self.video_player.gtksink)
+            self.video_player.playbin.set_property("audio-sink", Gst.ElementFactory.make("autoaudiosink", "audio-sink"))
+
+            # Hardware-Beschleunigung explizit setzen
+            self.video_player.setup_hardware_acceleration()
+            self.chromecast_expander.set_visible(False)
+
+        else:
+            self.timeline_update_timeout = GLib.timeout_add(500, self.update_timeline)
+
+        # Clear Thumbnail Cache wenn zu groß
+        if len(self.video_player.thumbnail_cache) > 50:
+            self.video_player.thumbnail_cache.clear()
+            print("Thumbnail cache cleared for performance")
+
 
     def setup_controls(self):
         """Erstellt die Steuerungsleiste"""
@@ -2936,6 +3726,267 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.last_equalizer_settings = None
         self.video_player.reset_equalizer()
 
+    def create_effects_popover(self):
+        """Erstellt das Popover für Video-Effekte (Rotation, Zoom, Crop, Gamma, Filter-Presets)"""
+        popover = Gtk.Popover()
+
+        # Hauptcontainer mit Tabs/Notebook
+        notebook = Gtk.Notebook()
+        notebook.set_margin_top(12)
+        notebook.set_margin_bottom(12)
+        notebook.set_margin_start(12)
+        notebook.set_margin_end(12)
+
+        # === TAB 1: Rotation & Spiegelung ===
+        rotation_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        rotation_box.set_margin_top(12)
+        rotation_box.set_margin_bottom(12)
+        rotation_box.set_margin_start(12)
+        rotation_box.set_margin_end(12)
+
+        rotation_label = Gtk.Label(label="Rotation & Spiegelung")
+        rotation_label.add_css_class("title-4")
+        rotation_box.append(rotation_label)
+
+        # Rotation Buttons
+        rotation_buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        btn_none = Gtk.Button(label="Normal")
+        btn_none.connect("clicked", lambda b: self.on_rotation_changed(0))
+        rotation_buttons_box.append(btn_none)
+
+        btn_90cw = Gtk.Button(label="90° ↻")
+        btn_90cw.connect("clicked", lambda b: self.on_rotation_changed(1))
+        rotation_buttons_box.append(btn_90cw)
+
+        btn_180 = Gtk.Button(label="180°")
+        btn_180.connect("clicked", lambda b: self.on_rotation_changed(2))
+        rotation_buttons_box.append(btn_180)
+
+        btn_90ccw = Gtk.Button(label="90° ↺")
+        btn_90ccw.connect("clicked", lambda b: self.on_rotation_changed(3))
+        rotation_buttons_box.append(btn_90ccw)
+
+        rotation_box.append(rotation_buttons_box)
+
+        # Spiegelung Buttons
+        flip_buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        btn_h_flip = Gtk.Button(label="↔ Horizontal")
+        btn_h_flip.connect("clicked", lambda b: self.on_rotation_changed(4))
+        flip_buttons_box.append(btn_h_flip)
+
+        btn_v_flip = Gtk.Button(label="↕ Vertikal")
+        btn_v_flip.connect("clicked", lambda b: self.on_rotation_changed(5))
+        flip_buttons_box.append(btn_v_flip)
+
+        rotation_box.append(flip_buttons_box)
+
+        notebook.append_page(rotation_box, Gtk.Label(label="Rotation"))
+
+        # === TAB 2: Zoom & Crop ===
+        zoom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        zoom_box.set_margin_top(12)
+        zoom_box.set_margin_bottom(12)
+        zoom_box.set_margin_start(12)
+        zoom_box.set_margin_end(12)
+
+        # Zoom
+        zoom_title = Gtk.Label(label="Zoom")
+        zoom_title.add_css_class("title-4")
+        zoom_title.set_xalign(0)
+        zoom_box.append(zoom_title)
+
+        self.zoom_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.5, 3.0, 0.1)
+        self.zoom_scale.set_value(1.0)
+        self.zoom_scale.set_draw_value(True)
+        self.zoom_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.zoom_scale.set_hexpand(True)
+        self.zoom_scale.connect("value-changed", self.on_zoom_changed)
+        zoom_box.append(self.zoom_scale)
+
+        # Crop
+        crop_title = Gtk.Label(label="Zuschneiden (Crop)")
+        crop_title.add_css_class("title-4")
+        crop_title.set_xalign(0)
+        crop_title.set_margin_top(12)
+        zoom_box.append(crop_title)
+
+        # Crop Top
+        crop_top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        crop_top_label = Gtk.Label(label="Oben:")
+        crop_top_label.set_width_chars(8)
+        crop_top_box.append(crop_top_label)
+        self.crop_top_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 500, 10)
+        self.crop_top_scale.set_value(0)
+        self.crop_top_scale.set_draw_value(True)
+        self.crop_top_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.crop_top_scale.set_hexpand(True)
+        self.crop_top_scale.connect("value-changed", self.on_crop_changed)
+        crop_top_box.append(self.crop_top_scale)
+        zoom_box.append(crop_top_box)
+
+        # Crop Bottom
+        crop_bottom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        crop_bottom_label = Gtk.Label(label="Unten:")
+        crop_bottom_label.set_width_chars(8)
+        crop_bottom_box.append(crop_bottom_label)
+        self.crop_bottom_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 500, 10)
+        self.crop_bottom_scale.set_value(0)
+        self.crop_bottom_scale.set_draw_value(True)
+        self.crop_bottom_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.crop_bottom_scale.set_hexpand(True)
+        self.crop_bottom_scale.connect("value-changed", self.on_crop_changed)
+        crop_bottom_box.append(self.crop_bottom_scale)
+        zoom_box.append(crop_bottom_box)
+
+        # Crop Left
+        crop_left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        crop_left_label = Gtk.Label(label="Links:")
+        crop_left_label.set_width_chars(8)
+        crop_left_box.append(crop_left_label)
+        self.crop_left_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 500, 10)
+        self.crop_left_scale.set_value(0)
+        self.crop_left_scale.set_draw_value(True)
+        self.crop_left_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.crop_left_scale.set_hexpand(True)
+        self.crop_left_scale.connect("value-changed", self.on_crop_changed)
+        crop_left_box.append(self.crop_left_scale)
+        zoom_box.append(crop_left_box)
+
+        # Crop Right
+        crop_right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        crop_right_label = Gtk.Label(label="Rechts:")
+        crop_right_label.set_width_chars(8)
+        crop_right_box.append(crop_right_label)
+        self.crop_right_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 500, 10)
+        self.crop_right_scale.set_value(0)
+        self.crop_right_scale.set_draw_value(True)
+        self.crop_right_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.crop_right_scale.set_hexpand(True)
+        self.crop_right_scale.connect("value-changed", self.on_crop_changed)
+        crop_right_box.append(self.crop_right_scale)
+        zoom_box.append(crop_right_box)
+
+        notebook.append_page(zoom_box, Gtk.Label(label="Zoom/Crop"))
+
+        # === TAB 3: Gamma & Filter-Presets ===
+        gamma_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        gamma_box.set_margin_top(12)
+        gamma_box.set_margin_bottom(12)
+        gamma_box.set_margin_start(12)
+        gamma_box.set_margin_end(12)
+
+        # Gamma
+        gamma_title = Gtk.Label(label="Gamma-Korrektur")
+        gamma_title.add_css_class("title-4")
+        gamma_title.set_xalign(0)
+        gamma_box.append(gamma_title)
+
+        self.gamma_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.1, 3.0, 0.1)
+        self.gamma_scale.set_value(1.0)
+        self.gamma_scale.set_draw_value(True)
+        self.gamma_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.gamma_scale.set_hexpand(True)
+        self.gamma_scale.connect("value-changed", self.on_gamma_changed)
+        gamma_box.append(self.gamma_scale)
+
+        # Filter-Presets
+        presets_title = Gtk.Label(label="Filter-Presets")
+        presets_title.add_css_class("title-4")
+        presets_title.set_xalign(0)
+        presets_title.set_margin_top(12)
+        gamma_box.append(presets_title)
+
+        # Preset Buttons Grid
+        preset_grid = Gtk.Grid()
+        preset_grid.set_column_spacing(6)
+        preset_grid.set_row_spacing(6)
+
+        presets = [
+            ("Normal", "normal"),
+            ("Sepia", "sepia"),
+            ("Graustufen", "grayscale"),
+            ("Schwarz-Weiß", "blackwhite"),
+            ("Vintage", "vintage"),
+            ("Lebhaft", "vivid"),
+            ("Dunkel", "dark"),
+            ("Hell", "bright"),
+            ("Kalt", "cold"),
+            ("Warm", "warm")
+        ]
+
+        for i, (label, preset_name) in enumerate(presets):
+            btn = Gtk.Button(label=label)
+            btn.connect("clicked", lambda b, p=preset_name: self.on_preset_clicked(p))
+            preset_grid.attach(btn, i % 2, i // 2, 1, 1)
+
+        gamma_box.append(preset_grid)
+
+        notebook.append_page(gamma_box, Gtk.Label(label="Gamma/Filter"))
+
+        # Reset Button
+        reset_button = Gtk.Button(label="Alle Effekte zurücksetzen")
+        reset_button.set_margin_top(12)
+        reset_button.connect("clicked", self.on_effects_reset)
+
+        # Hauptbox
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main_box.append(notebook)
+        main_box.append(reset_button)
+
+        popover.set_child(main_box)
+        return popover
+
+    def on_rotation_changed(self, rotation):
+        """Callback für Rotation-Änderung"""
+        self.video_player.set_rotation(rotation)
+
+    def on_zoom_changed(self, scale):
+        """Callback für Zoom-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_zoom(value)
+
+    def on_crop_changed(self, scale):
+        """Callback für Crop-Änderung"""
+        left = int(self.crop_left_scale.get_value())
+        right = int(self.crop_right_scale.get_value())
+        top = int(self.crop_top_scale.get_value())
+        bottom = int(self.crop_bottom_scale.get_value())
+        self.video_player.set_crop(left, right, top, bottom)
+
+    def on_gamma_changed(self, scale):
+        """Callback für Gamma-Änderung"""
+        value = scale.get_value()
+        self.video_player.set_gamma(value)
+
+    def on_preset_clicked(self, preset_name):
+        """Callback für Filter-Preset"""
+        self.video_player.apply_filter_preset(preset_name)
+        # Update Equalizer-Sliders um die Werte zu reflektieren
+        settings = self.video_player.get_equalizer()
+        self.brightness_scale.set_value(settings['brightness'])
+        self.contrast_scale.set_value(settings['contrast'])
+        self.saturation_scale.set_value(settings['saturation'])
+        self.hue_scale.set_value(settings['hue'])
+        self.gamma_scale.set_value(settings['gamma'])
+
+    def on_effects_reset(self, _button):
+        """Reset alle Video-Effekte"""
+        self.video_player.reset_video_effects()
+        # Reset UI-Sliders
+        self.zoom_scale.set_value(1.0)
+        self.crop_left_scale.set_value(0)
+        self.crop_right_scale.set_value(0)
+        self.crop_top_scale.set_value(0)
+        self.crop_bottom_scale.set_value(0)
+        self.gamma_scale.set_value(1.0)
+        # Reset auch Equalizer-Sliders
+        self.brightness_scale.set_value(0.0)
+        self.contrast_scale.set_value(1.0)
+        self.saturation_scale.set_value(1.0)
+        self.hue_scale.set_value(0.0)
+
     def on_set_loop_a(self, _button):
         """Setzt den Startpunkt (A) für A-B Loop"""
         position = self.get_current_position()
@@ -2996,6 +4047,56 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # Springe zurück zu Punkt A
                 self.seek_to_position(self.ab_loop_a)
                 print(f"A-B Loop: Zurück zu Punkt A ({self.ab_loop_a:.1f}s)")
+
+    def update_chromecast_status_display(self):
+        """Aktualisiert die erweiterte Chromecast-Status-Anzeige"""
+        if not hasattr(self, 'chromecast_expander'):
+            return
+
+        status = self.cast_manager.get_extended_status()
+
+        if status['connected']:
+            # Zeige Expander
+            self.chromecast_expander.set_visible(True)
+
+            # Update Labels
+            self.cc_device_label.set_text(f"Gerät: {status['device_name']}")
+            self.cc_model_label.set_text(f"Modell: {status.get('device_model', 'N/A')}")
+            self.cc_app_label.set_text(f"App: {status['app_name']}")
+
+            # Status mit Farbe
+            state = status['player_state']
+            state_color = ""
+            if state == "PLAYING":
+                state_color = "🟢"
+            elif state == "PAUSED":
+                state_color = "🟡"
+            elif state == "BUFFERING":
+                state_color = "🔵"
+            elif state == "IDLE":
+                state_color = "⚪"
+            self.cc_state_label.set_text(f"Status: {state_color} {state}")
+
+            # Media Info
+            media_title = status['media_title']
+            if len(media_title) > 35:
+                media_title = media_title[:32] + "..."
+            self.cc_media_label.set_text(f"Media: {media_title}")
+
+            # Buffer
+            buffer_percent = status['buffer_percent']
+            self.cc_buffer_label.set_text(f"Fortschritt: {buffer_percent}%")
+
+            # Group Members (falls vorhanden)
+            members = self.cast_manager.get_group_members()
+            if len(members) > 1:
+                self.cc_group_label.set_text(f"Gruppe ({len(members)}): {', '.join(members)}")
+                self.cc_group_label.set_visible(True)
+            else:
+                self.cc_group_label.set_visible(False)
+        else:
+            # Verstecke Expander wenn nicht verbunden
+            self.chromecast_expander.set_visible(False)
 
     def on_show_goto_dialog(self, _button):
         """Zeigt Dialog zum Springen zu einer bestimmten Zeit"""
@@ -3337,6 +4438,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.audio_button.set_sensitive(False)
                 self.speed_button.set_sensitive(True)  # Speed ist immer für lokale Wiedergabe verfügbar
                 self.equalizer_button.set_sensitive(True)  # Equalizer ist immer für lokale Wiedergabe verfügbar
+                self.effects_button.set_sensitive(True)  # Video-Effekte sind immer für lokale Wiedergabe verfügbar
 
                 # A-B Loop Buttons aktivieren
                 self.ab_button_a.set_sensitive(True)
@@ -3874,6 +4976,39 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             entry_box.set_margin_top(4)
             entry_box.set_margin_bottom(4)
 
+            # Thumbnail-Bild
+            thumbnail_image = Gtk.Image()
+            thumbnail_image.set_pixel_size(60)  # Größe des Thumbnails
+
+            # Versuche Thumbnail zu laden (nur für lokale Videos, nicht URLs)
+            video_file_path = video_path.get('path', '')
+            if video_file_path and not video_file_path.startswith('http'):
+                thumbnail_path = self.video_player.get_thumbnail_path(video_file_path)
+
+                # Wenn Thumbnail existiert, lade es
+                if os.path.exists(thumbnail_path):
+                    try:
+                        thumbnail_image.set_from_file(thumbnail_path)
+                    except Exception as e:
+                        print(f"Fehler beim Laden des Thumbnails: {e}")
+                        thumbnail_image.set_from_icon_name("video-x-generic-symbolic")
+                else:
+                    # Thumbnail existiert nicht, zeige Platzhalter-Icon
+                    thumbnail_image.set_from_icon_name("video-x-generic-symbolic")
+
+                    # Extrahiere Thumbnail asynchron im Hintergrund
+                    def extract_async():
+                        if self.video_player.extract_video_thumbnail(video_file_path, thumbnail_path):
+                            # Aktualisiere UI im Hauptthread
+                            GLib.idle_add(lambda: thumbnail_image.set_from_file(thumbnail_path))
+
+                    threading.Thread(target=extract_async, daemon=True).start()
+            else:
+                # Für URLs oder fehlende Pfade zeige Video-Icon
+                thumbnail_image.set_from_icon_name("video-x-generic-symbolic")
+
+            entry_box.append(thumbnail_image)
+
             # Icon für aktuelles Video
             if index == self.playlist_manager.current_index:
                 icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
@@ -3996,6 +5131,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         
         # Erlaube, dass das Info-Overlay für das neue Video einmal angezeigt wird
         self.info_overlay_shown_for_current_video = False
+        self._streams_info_updated_for_current_video = False
 
         if not is_url:
             self.current_video_path = filepath
@@ -4034,6 +5170,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.audio_button.set_sensitive(False)
             self.speed_button.set_sensitive(True)  # Speed ist immer für lokale Wiedergabe verfügbar
             self.equalizer_button.set_sensitive(True)  # Equalizer ist immer für lokale Wiedergabe verfügbar
+            self.effects_button.set_sensitive(True)  # Video-Effekte sind immer für lokale Wiedergabe verfügbar
             self.ab_button_a.set_sensitive(True)
             self.ab_button_b.set_sensitive(True)
             self.goto_button.set_sensitive(True)
@@ -4308,6 +5445,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def toggle_play_pause(self):
         """Wechselt zwischen Wiedergabe und Pause."""
+        # Finde den aktuellen Wiedergabestatus
+        current_state = self.video_player.playbin.get_state(0).state
+        is_playing = (current_state == Gst.State.PLAYING)
+
+        # Führe die entsprechende Aktion aus
+        """Wechselt zwischen Wiedergabe und Pause."""
         is_playing = False
         if self.play_mode == "local":
             state = self.video_player.playbin.get_state(0).state
@@ -4342,20 +5485,47 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def on_toggle_fullscreen(self, button):
         """Schaltet den Vollbild-Modus um."""
-        is_currently_fullscreen = self.is_fullscreen()
-        self._toggle_ui_for_fullscreen(not is_currently_fullscreen)
-
         if self.is_fullscreen():
             self.unfullscreen()
+            self._toggle_ui_for_fullscreen(False)
         else:
             self.fullscreen()
+            self._toggle_ui_for_fullscreen(True)
 
     def _toggle_ui_for_fullscreen(self, fullscreen_active):
         """Zeigt/versteckt UI-Elemente für den Vollbildmodus."""
-        self.main_box.get_first_child().set_visible(not fullscreen_active) # HeaderBar
+        self.main_box.get_first_child().set_visible(not fullscreen_active)  # HeaderBar
         self.sidebar.set_visible(not fullscreen_active)
         self.timeline_widget.set_visible(not fullscreen_active)
         self.control_box.set_visible(not fullscreen_active)
+
+        # Entferne/Setze Ränder für echten Vollbildmodus
+        if fullscreen_active:
+            self.content_box.set_margin_start(0)
+            self.content_box.set_margin_end(0)
+            self.content_box.set_margin_top(0)
+            self.content_box.set_margin_bottom(0)
+        else:
+            self.content_box.set_margin_start(12)
+            self.content_box.set_margin_end(12)
+            self.content_box.set_margin_top(12)
+            self.content_box.set_margin_bottom(12)
+
+        # Mauszeiger im Vollbildmodus ausblenden
+        window = self.get_native()
+        if window:
+            if fullscreen_active:
+                # Erstelle einen leeren Cursor, um ihn auszublenden
+                cursor = Gdk.Cursor.new_from_name("none")
+                window.set_cursor(cursor)
+            else:
+                # Setze den Cursor auf den Standard zurück
+                window.set_cursor(None)
+
+    def on_video_area_click(self, gesture, n_press, x, y):
+        """Behandelt Klicks im Videobereich (für Doppelklick-Vollbild)."""
+        if n_press == 2:  # Doppelklick
+            self.on_toggle_fullscreen(None)
 
     def show_video_info(self, video_info):
         """Zeigt das Info-Overlay für einige Sekunden an."""
@@ -4410,10 +5580,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def update_media_menus(self):
         """Aktualisiert Untertitel-, Audio- und Kapitel-Menüs."""
+        if self._streams_info_updated_for_current_video:
+            return False # Already updated for this video
+
         self.update_subtitle_menu()
         self.update_audio_menu() 
         # Kapitel werden über eine separate TOC-Nachricht (`toc_ready_callback`) behandelt,
         # daher hier nicht mehr aufrufen.
+        self._streams_info_updated_for_current_video = True
         return False
 
     def update_subtitle_menu(self):
@@ -4648,6 +5822,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Speichere aktuelle Playlist
         self.config.save_playlist(self.playlist_manager.playlist)
         # Erlaube wieder Standby
+
         try:
             self.uninhibit_suspend()
         except Exception as e:
@@ -4675,6 +5850,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.http_server.stop_server()
         except Exception as e:
             print(f"Fehler beim Stoppen des HTTP-Servers: {e}")
+
+        # Stoppe Thumbnail-Worker-Thread
+        try:
+            if hasattr(self, 'thumbnail_thread_running') and self.thumbnail_thread_running:
+                print("Stoppe Thumbnail-Worker...")
+                self.thumbnail_thread_running = False
+                self.thumbnail_queue.put(None)  # Shutdown-Signal
+                if self.thumbnail_thread and self.thumbnail_thread.is_alive():
+                    self.thumbnail_thread.join(timeout=1.0)
+        except Exception as e:
+            print(f"Fehler beim Stoppen des Thumbnail-Workers: {e}")
 
         print("Cleanup abgeschlossen")
         return False  # Erlaubt Fenster zu schließen
@@ -4720,9 +5906,23 @@ class VideoPlayerApp(Adw.Application):
             self.win.on_set_speed(action, param)
 
 
+
 def main():
-    app = VideoPlayerApp()
-    return app.run(sys.argv)
+    print("=== Video Player Starting ===", file=sys.stderr, flush=True)
+    print(f"Python: {sys.version}", file=sys.stderr, flush=True)
+    print(f"Args: {sys.argv}", file=sys.stderr, flush=True)
+
+    try:
+        app = VideoPlayerApp()
+        print("App created successfully", file=sys.stderr, flush=True)
+        result = app.run(sys.argv)
+        print(f"App.run() returned: {result}", file=sys.stderr, flush=True)
+        return result
+    except Exception as e:
+        print(f"FATAL ERROR: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':

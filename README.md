@@ -36,11 +36,14 @@
 - **GTK4/Libadwaita** UI im GNOME-Stil
 - **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos über URL-Eingabe
 - **Playlist-Unterstützung** - Mehrere Videos in Warteschlange mit Auto-Advance
+- **Playlist-Thumbnails** - Automatische Video-Vorschaubilder in der Playlist
 - **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
 - **Drag & Drop** - Videos direkt ins Fenster ziehen
 - **Timeline/Seek-Funktion** mit Echtzeit-Positionsanzeige
 - **Lautstärkeregelung** mit Slider für lokale und Chromecast-Wiedergabe
 - **Video-Info-Overlay** - Zeigt Codec, Auflösung und Bitrate an
+- **Video-Effekte** - Rotation, Spiegelung, Zoom, Crop, Gamma-Korrektur
+- **Filter-Presets** - 10 vordefinierte Filter (Sepia, Vintage, Schwarz-Weiß, etc.)
 - **Untertitel-Support** - Automatische Erkennung von SRT, ASS, VTT Dateien
 - **Audio-Track-Auswahl** - Wechsel zwischen mehreren Audio-Spuren
 - **Lesezeichen/Resume** - Automatisches Speichern und Fortsetzen der Wiedergabe
@@ -68,6 +71,11 @@
 - **Xiaomi TV Kompatibilität** mit speziellen Fixes
 - **Timeline-Synchronisation** zwischen Lokal und Chromecast
 - **Intelligentes Caching**: Konvertierte Videos werden für schnelleren Zugriff gespeichert
+- **Untertitel-Unterstützung** - Untertitel auf Chromecast-Gerät anzeigen
+- **Audio-Track-Auswahl** - Wähle Audio-Spuren für Chromecast-Wiedergabe
+- **Multi-Room-Audio** - Synchronisierte Wiedergabe auf mehreren Geräten
+- **Gruppen-Support** - Verbindung mit Chromecast-Gruppen
+- **Erweiterte Status-Anzeige** - Detaillierte Chromecast-Informationen in Echtzeit
 
 ### 🎞️ Video-Formate & Codecs
 - **Alle gängigen Container**: MP4, MKV, AVI, WebM, MOV, FLV, OGG, MPEG, TS, WMV
@@ -209,7 +217,15 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
    - Klicke auf den **Import-Button** (Ordner-Symbol) in der Playlist-Sektion.
    - Wähle eine `.m3u`- oder `.pls`-Datei aus.
    - Die enthaltenen Videos werden automatisch zur Playlist hinzugefügt.
-7. Leere die gesamte Playlist mit dem **Papierkorb**-Button
+8. Leere die gesamte Playlist mit dem **Papierkorb**-Button
+
+**Playlist-Thumbnails:**
+- Jedes Video in der Playlist zeigt automatisch ein **Vorschaubild** (Thumbnail) aus dem Video
+- Thumbnails werden beim ersten Mal automatisch extrahiert und gecacht
+- Die Vorschaubilder werden aus der Mitte des Videos (ca. 5 Sekunden) generiert
+- Thumbnails sind **60x60 Pixel** groß für optimale Performance
+- Gecachte Thumbnails werden in `~/.cache/gnome-chromecast-player/thumbnails/` gespeichert
+- Bei YouTube-Videos oder URLs wird ein Standard-Video-Icon angezeigt
 
 ### Drag & Drop verwenden
 
@@ -298,6 +314,46 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 4. Klicke auf **Zurücksetzen**, um alle Werte auf Standard zurückzusetzen.
 5. Perfekt für Videos mit schlechter Farbqualität oder zu dunklen Szenen.
 
+### Video-Effekte verwenden
+
+1. Klicke auf den **Video-Effekte-Button** (Bild-Symbol) in der Kopfleiste
+2. Ein Fenster mit 3 Tabs öffnet sich:
+
+**Tab 1 - Rotation & Spiegelung:**
+   - **Normal**: Keine Rotation
+   - **90° ↻**: 90° im Uhrzeigersinn drehen
+   - **180°**: Um 180° drehen
+   - **90° ↺**: 90° gegen Uhrzeigersinn drehen
+   - **↔ Horizontal**: Horizontal spiegeln
+   - **↕ Vertikal**: Vertikal spiegeln
+
+**Tab 2 - Zoom & Crop:**
+   - **Zoom**: 0.5x bis 3.0x Vergrößerung (Standard: 1.0x)
+   - **Zuschneiden**: Schneide Pixel von jeder Seite ab
+     - Oben: 0-500 Pixel
+     - Unten: 0-500 Pixel
+     - Links: 0-500 Pixel
+     - Rechts: 0-500 Pixel
+
+**Tab 3 - Gamma & Filter:**
+   - **Gamma-Korrektur**: 0.1 bis 3.0 (Standard: 1.0)
+     - Höhere Werte = heller
+     - Niedrigere Werte = dunkler
+   - **Filter-Presets**: 10 vordefinierte Effekte
+     - **Normal**: Standard-Einstellungen
+     - **Sepia**: Vintage Sepia-Ton
+     - **Graustufen**: Schwarz-Weiß ohne Kontrast
+     - **Schwarz-Weiß**: Hoher Kontrast Schwarz-Weiß
+     - **Vintage**: Retro-Look mit reduzierten Farben
+     - **Lebhaft**: Kräftige, gesättigte Farben
+     - **Dunkel**: Dunkler Film-Look
+     - **Hell**: Aufgehelltes Video
+     - **Kalt**: Kühlerer Blau-Ton
+     - **Warm**: Wärmerer Orange-Ton
+
+3. Klicke auf **Alle Effekte zurücksetzen**, um alle Einstellungen auf Standard zurückzusetzen
+4. Perfekt für Videos mit falscher Ausrichtung, ungewünschten Rändern oder für kreative Effekte
+
 ### A-B Loop verwenden (Wiederholungsschleife)
 
 1. Spiele ein Video ab und navigiere zum gewünschten **Startpunkt**.
@@ -344,6 +400,35 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 6. Öffne ein Video und starte die Wiedergabe
 7. **MKV/AVI-Dateien werden automatisch zu MP4 konvertiert** - das kann beim ersten Mal einige Sekunden dauern
 8. Konvertierte Videos werden gecacht in `~/.cache/video-chromecast-player/` für schnelleren Zugriff beim nächsten Mal
+
+### Erweiterte Chromecast-Features
+
+**Erweiterte Status-Anzeige:**
+1. Nach der Verbindung mit einem Chromecast erscheint ein **"Erweiterte Informationen"** Expander in der Seitenleiste
+2. Klappe ihn auf, um detaillierte Informationen zu sehen:
+   - Gerätename und Modell
+   - Aktive App
+   - Wiedergabe-Status (PLAYING 🟢, PAUSED 🟡, BUFFERING 🔵, IDLE ⚪)
+   - Aktuell abgespielte Media
+   - Wiedergabe-Fortschritt in Prozent
+   - Gruppen-Mitglieder (falls in einer Gruppe)
+
+**Chromecast-Gruppen (Multi-Room-Audio):**
+1. Erstelle Gruppen in der **Google Home App** auf deinem Smartphone
+2. Füge mehrere Chromecast-Geräte zu einer Gruppe hinzu
+3. Im Video Player werden Gruppen automatisch bei der Geräte-Suche angezeigt
+4. Verbinde dich mit einer Gruppe wie mit einem normalen Gerät
+5. Audio wird synchronisiert auf allen Geräten in der Gruppe abgespielt
+6. Die Status-Anzeige zeigt alle Gruppenmitglieder an
+
+**Untertitel für Chromecast:**
+- Untertitel werden automatisch mit dem Video übertragen (experimentell)
+- Funktioniert mit VTT-Format (besser unterstützt als SRT)
+- HTTP-Server stellt Untertitel-Dateien bereit
+
+**Audio-Track-Auswahl:**
+- Mehrere Audio-Spuren werden auf Chromecast unterstützt
+- Wechsel zwischen verfügbaren Audio-Tracks möglich
 
 ### Modi
 
@@ -665,13 +750,14 @@ Wenn du einen Bug findest:
 ## 🚀 Roadmap / Geplante Features
 
 ### 🎨 Video-Effekte & Verarbeitung
-- [ ] **Video-Rotation & Spiegelung** - Drehen (90°, 180°, 270°) und spiegeln (horizontal/vertikal)
-- [ ] **Crop & Zoom** - Dynamisches Zuschneiden und Zoomen während der Wiedergabe
-- [ ] **Filter-Presets** - Vordefinierte Effekte (Sepia, Schwarz-Weiß, Vintage)
-- [ ] **Gamma-Korrektur** - Erweiterte Gamma-Anpassung für bessere Darstellung
+- [x] **Video-Rotation & Spiegelung** - Drehen (90°, 180°, 270°) und spiegeln (horizontal/vertikal) ✓
+- [x] **Crop & Zoom** - Dynamisches Zuschneiden und Zoomen während der Wiedergabe ✓
+- [x] **Filter-Presets** - Vordefinierte Effekte (Sepia, Schwarz-Weiß, Vintage) ✓
+- [x] **Gamma-Korrektur** - Erweiterte Gamma-Anpassung für bessere Darstellung ✓
 - [ ] **RGB-Kanal-Kontrolle** - Individuelle Einstellung von Rot-, Grün- und Blau-Kanälen
 
 ### 📋 Playlist-Management
+- [x] **Playlist-Thumbnails** - Automatische Video-Vorschaubilder in der Playlist ✓
 - [ ] **Playlist-Suche** - Schnelles Filtern und Suchen in der Playlist
 - [ ] **Smart Playlists** - Automatische Playlists (Zuletzt gespielt, Meistgeschaut)
 - [ ] **Playlist-Kategorien** - Organisation mit Tags und Kategorien
@@ -715,11 +801,11 @@ Wenn du einen Bug findest:
 - [ ] **Thumbnail-Grid** - Storyboard-Ansicht aller Video-Thumbnails
 
 ### 🔧 Chromecast-Erweiterungen
-- [ ] **Chromecast-Untertitel** - Untertitel-Steuerung auf Remote-Gerät
-- [ ] **Chromecast-Audio-Tracks** - Audio-Spur-Auswahl für Chromecast
-- [ ] **Multi-Room-Audio** - Synchronisierte Wiedergabe auf mehreren Geräten
-- [ ] **Chromecast-Gruppen** - Unterstützung für Audio-Gruppen
-- [ ] **Erweiterte Status-Anzeige** - Detaillierte Chromecast-Informationen
+- [x] **Chromecast-Untertitel** - Untertitel-Steuerung auf Remote-Gerät ✓
+- [x] **Chromecast-Audio-Tracks** - Audio-Spur-Auswahl für Chromecast ✓
+- [x] **Multi-Room-Audio** - Synchronisierte Wiedergabe auf mehreren Geräten ✓
+- [x] **Chromecast-Gruppen** - Unterstützung für Audio-Gruppen ✓
+- [x] **Erweiterte Status-Anzeige** - Detaillierte Chromecast-Informationen ✓
 
 ### 🌐 Netzwerk & Integration
 - [ ] **DLNA/UPnP Support** - Netzwerk-Medienserver-Integration
@@ -752,6 +838,47 @@ Wenn du einen Bug findest:
 - [ ] **Metadaten-Export** - Video-Informationen als CSV/JSON
 
 ## 📊 Version History
+
+### Version 1.3.0 (Dezember 2025)
+- ✨ **Playlist-Thumbnails** - Automatische Video-Vorschaubilder in der Playlist
+- 🖼️ Jedes Video zeigt ein 60x60 Pixel Thumbnail aus der Video-Mitte
+- ⚡ Asynchrone Thumbnail-Extraktion ohne UI-Blockierung
+- 💾 Intelligentes Caching-System in `~/.cache/gnome-chromecast-player/thumbnails/`
+- 🎨 Platzhalter-Icon für YouTube-Videos und URLs
+- 🔧 `extract_video_thumbnail()` Methode für GStreamer-basierte Extraktion
+- 🔧 `get_thumbnail_path()` Methode mit MD5-Hash für eindeutige Cache-Dateinamen
+- 📊 Automatische Cache-Verwaltung und Wiederverwendung bestehender Thumbnails
+
+### Version 1.2.0 (Dezember 2025)
+- ✨ **Chromecast-Untertitel** - Untertitel-Unterstützung für Chromecast-Wiedergabe (VTT-Format)
+- ✨ **Chromecast-Audio-Tracks** - Auswahl von Audio-Spuren auf Remote-Gerät
+- ✨ **Multi-Room-Audio** - Synchronisierte Wiedergabe auf mehreren Chromecast-Geräten
+- ✨ **Chromecast-Gruppen** - Automatische Erkennung und Verbindung mit Gruppen
+- ✨ **Erweiterte Status-Anzeige** - Ausklappbare Detailanzeige in Seitenleiste
+- 📊 Echtzeit-Status: Gerätename, Modell, App, Wiedergabe-Status mit Icons
+- 📊 Fortschritts-Anzeige in Prozent für Chromecast-Wiedergabe
+- 🎵 Gruppen-Mitglieder-Anzeige bei Multi-Room-Wiedergabe
+- 🔧 `enable_subtitles()` und `disable_subtitles()` Methoden
+- 🔧 `set_audio_track()` für Audio-Spur-Wechsel
+- 🔧 `get_extended_status()` mit 15+ Status-Informationen
+- 🔧 `discover_cast_groups()` und `connect_to_group()` für Gruppen
+- 🔧 `get_group_members()` zeigt alle Geräte in der Gruppe
+- 🎨 Status-Icons: 🟢 PLAYING, 🟡 PAUSED, 🔵 BUFFERING, ⚪ IDLE
+- 🎨 Automatische UI-Updates alle 250ms im Chromecast-Modus
+
+### Version 1.1.0 (Dezember 2025)
+- ✨ **Video-Rotation & Spiegelung** - Drehen (90°, 180°, 270°) und spiegeln (horizontal/vertikal)
+- ✨ **Zoom & Crop** - Dynamisches Zoomen (0.5x-3.0x) und Zuschneiden des Videos
+- ✨ **Gamma-Korrektur** - Erweiterte Helligkeitsanpassung (0.1-3.0)
+- ✨ **Filter-Presets** - 10 vordefinierte Effekte (Sepia, Vintage, Schwarz-Weiß, Graustufen, Lebhaft, Hell, Dunkel, Kalt, Warm)
+- 🎨 Neuer Video-Effekte-Button in Header-Bar mit Tab-Interface
+- 🎯 Tab 1: Rotation & Spiegelung mit 6 Optionen
+- 🎯 Tab 2: Zoom (0.5x-3.0x) und Crop (0-500px pro Seite)
+- 🎯 Tab 3: Gamma-Korrektur und 10 Filter-Presets
+- 🔄 Alle Effekte zurücksetzen-Button für schnellen Reset
+- ⚡ GStreamer-Pipeline erweitert: videobalance → gamma → videoflip → videocrop → videoscale
+- 💾 Echtzeit-Anwendung aller Effekte ohne Performance-Verlust
+- 🎨 Preset-Synchronisation mit Equalizer-Einstellungen
 
 ### Version 1.0.9 (Dezember 2025)
 - ✨ **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos über URL-Eingabe
