@@ -34,6 +34,7 @@
 
 ### 🎨 Moderne Benutzeroberfläche
 - **GTK4/Libadwaita** UI im GNOME-Stil
+- **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos über URL-Eingabe
 - **Playlist-Unterstützung** - Mehrere Videos in Warteschlange mit Auto-Advance
 - **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
 - **Drag & Drop** - Videos direkt ins Fenster ziehen
@@ -219,11 +220,20 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 5. Das erste Video startet automatisch die Wiedergabe (falls noch kein Video läuft)
 6. **Visuelles Feedback**: Der Bereich wird blau umrandet beim Darüberziehen
 
-### Chromecast verwenden
+### YouTube Videos abspielen
 
-1. **Vollbild-Modus**
-   - Drücke die **F11**-Taste, um in den Vollbild-Modus zu wechseln und ihn wieder zu verlassen.
-   - Alternativ kannst du den Vollbild-Button in der Kopfleiste verwenden.
+1. Klicke auf den **YouTube-Button** (▶-Symbol) in der Header-Bar
+2. Ein Dialog öffnet sich mit einem Eingabefeld für die YouTube-URL
+3. Füge die URL eines YouTube-Videos ein (z.B. `https://www.youtube.com/watch?v=...`)
+4. Klicke auf **Video laden**
+5. Das Video wird automatisch extrahiert und zur Playlist hinzugefügt
+6. **Hinweis**: Benötigt `yt-dlp` für die Video-Extraktion
+7. Funktioniert sowohl für lokale Wiedergabe als auch für Chromecast-Streaming
+
+### Vollbild-Modus
+
+1. Drücke die **F11**-Taste, um in den Vollbild-Modus zu wechseln und ihn wieder zu verlassen
+2. Alternativ kannst du den Vollbild-Button in der Kopfleiste verwenden
 
 ### Tastatur-Shortcuts
 
@@ -671,11 +681,20 @@ Wenn du einen Bug findest:
 - [x] **Go-To-Zeit** - Sprung zu bestimmter Zeitposition ✓
 - [x] **Kapitel-Erkennung** - Automatische Erkennung von MKV/MP4 Kapiteln ✓
 - [x] **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline ✓
-- [ ] **Picture-in-Picture** - Schwebendes Mini-Fenster
-- [ ] **Untertitel-Editor** - Inline-Bearbeitung von Untertiteln
-- [ ] **Playlist-Schleifen** - Loop-Modus für Playlists
+- [x] **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos ✓
+- [x] **Picture-in-Picture** - Schwebendes Mini-Fenster ✓
+- [x] **Untertitel-Editor** - Inline-Bearbeitung von Untertiteln ✓
+- [x] **Playlist-Schleifen** - Loop-Modus für Playlists ✓
 
 ## 📊 Version History
+
+### Version 1.0.9 (Dezember 2025)
+- ✨ **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos über URL-Eingabe
+- 🎬 YouTube-Button in Header-Bar für einfachen Zugriff
+- 🔗 URL-Dialog zum Einfügen von YouTube-Links
+- 📺 Unterstützung für lokale und Chromecast-Wiedergabe von YouTube-Inhalten
+- ⚡ Automatische Video-Extraktion mit yt-dlp Integration
+- 🎯 Nahtlose Integration in bestehende Playlist-Funktionalität
 
 ### Version 1.8.0 (Dezember 2025)
 - ✨ **Go-To-Zeit** - Sprung zu bestimmter Zeitposition mit Dialog (MM:SS oder HH:MM:SS)
