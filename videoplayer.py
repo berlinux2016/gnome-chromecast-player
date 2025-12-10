@@ -2484,7 +2484,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.main_box.append(self.timeline_widget)
 
         # Spiele-Modus (lokal oder chromecast) - muss vor setup_controls() initialisiert werden
-        self.play_mode = self.config.get_setting("play_mode", "local")
+        # Startet immer im lokalen Modus
+        self.play_mode = "local"
 
         # Kontrollleiste
         self.setup_controls()
@@ -2536,11 +2537,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # CSS für visuelles Drag-and-Drop Feedback
         self.setup_drop_css()
 
-        # Initialisiere Modus-Switch basierend auf gespeicherten Einstellungen
-        if self.play_mode == "chromecast":
-            self.mode_switch.set_active(True)
-        else:
-            self.mode_switch.set_active(False)
+        # Der Modus-Switch ist bereits in setup_controls() initialisiert worden
+        # Kein erneutes Setzen nötig, da play_mode beim Start immer "local" ist
 
         # Window-Größe wiederherstellen
         window_width = self.config.get_setting("window_width", 1000)
@@ -4488,10 +4486,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_scan_chromecasts(self, button):
         """Sucht nach Chromecast-Geräten"""
         self.status_label.set_text("Suche nach Geräten...")
-        button.set_sensitive(False)
+        if button:
+            button.set_sensitive(False)
 
         def on_devices_found(devices):
-            button.set_sensitive(True)
+            if button:
+                button.set_sensitive(True)
             # Liste leeren
             while True:
                 row = self.device_list.get_row_at_index(0)
@@ -4535,6 +4535,73 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.status_label.set_text(f"Verbunden: {device_name}")
             # Speichere Gerät in Config
             self.config.set_setting("chromecast_device", device_name)
+
+            # Speichere aktuelle Position falls Video läuft
+            current_position = None
+            if self.current_video_path:
+                current_position = self.video_player.get_position()
+
+            # Wechsle automatisch in Chromecast-Modus nach erfolgreicher Verbindung
+            # Handler blockieren, damit on_mode_changed nicht doppelt aufgerufen wird
+            self.mode_switch.handler_block_by_func(self.on_mode_changed)
+            self.mode_switch.set_active(True)
+            self.mode_switch.handler_unblock_by_func(self.on_mode_changed)
+
+            # Setze play_mode manuell
+            self.play_mode = "chromecast"
+            self.config.set_setting("play_mode", "chromecast")
+            self._update_mode_label()
+
+            print(f"Chromecast-Modus aktiviert nach Verbindung mit '{device_name}'")
+
+            # Wenn ein Video geladen war, starte automatisch Streaming
+            if self.current_video_path:
+                print(f"Starte automatisches Streaming von: {Path(self.current_video_path).name}")
+
+                # Stoppe lokale Wiedergabe
+                self.video_player.stop()
+
+                # Starte Chromecast-Streaming in Thread
+                def start_streaming():
+                    from pathlib import Path
+                    filename = Path(self.current_video_path).name
+                    video_path = self.current_video_path
+
+                    # Konvertierung falls nötig
+                    if video_path.lower().endswith(('.mkv', '.avi')):
+                        GLib.idle_add(self.status_label.set_text, "Konvertiere Video...")
+                        converted_path = self.video_converter.convert_to_mp4(video_path)
+                        if converted_path:
+                            video_path = converted_path
+
+                    video_url = self.http_server.get_video_url(video_path)
+                    if video_url:
+                        success = self.cast_manager.play_video(self.current_video_path, video_url)
+                        if success:
+                            # Springe zur gespeicherten Position falls vorhanden
+                            if current_position and current_position > 0:
+                                import time
+                                time.sleep(2)  # Warte bis Streaming gestartet ist
+                                self.cast_manager.seek(current_position)
+
+                            GLib.idle_add(lambda: (
+                                self.status_label.set_text(f"Streamt: {filename}"),
+                                self.start_timeline_updates(),
+                                self.inhibit_suspend(),
+                                self.play_button.set_sensitive(True),
+                                self.play_button.set_icon_name("media-playback-pause-symbolic"),
+                                False
+                            ))
+                        else:
+                            GLib.idle_add(self.status_label.set_text, "Streaming fehlgeschlagen")
+                    else:
+                        GLib.idle_add(self.status_label.set_text, "HTTP-Server-Fehler")
+
+                import threading
+                thread = threading.Thread(target=start_streaming, daemon=True)
+                thread.start()
+            else:
+                self.status_label.set_text(f"Chromecast bereit: {device_name}")
         else:
             self.status_label.set_text(f"Verbindung fehlgeschlagen")
         return False
@@ -4550,6 +4617,32 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Wechselt zwischen lokalem und Chromecast-Modus"""
         if switch.get_active():
             # Wechsel zu Chromecast-Modus
+
+            # Prüfe ob bereits nach Chromecasts gesucht wurde
+            if not self.cast_manager._discovery_browser and not self.cast_manager.selected_cast:
+                # Noch keine Suche durchgeführt - zeige Hinweis-Dialog
+                dialog = Adw.AlertDialog.new(
+                    "Chromecast-Gerät suchen",
+                    "Um Chromecast verwenden zu können, müssen Sie zuerst nach verfügbaren Geräten suchen.\n\n"
+                    "Klicken Sie auf das Chromecast-Symbol oben rechts, um nach Geräten zu suchen."
+                )
+                dialog.add_response("ok", "Verstanden")
+                dialog.add_response("search", "Jetzt suchen")
+                dialog.set_response_appearance("search", Adw.ResponseAppearance.SUGGESTED)
+                dialog.set_default_response("search")
+
+                def on_dialog_response(d, response):
+                    if response == "search":
+                        # Öffne Chromecast-Auswahl
+                        self.on_scan_chromecasts(None)
+                    else:
+                        # Schalte zurück zu Lokal-Modus
+                        self.mode_switch.set_active(False)
+
+                dialog.connect("response", on_dialog_response)
+                dialog.present(self)
+                return
+
             self.play_mode = "chromecast"
             self.config.set_setting("play_mode", "chromecast")
             self._update_mode_label()
