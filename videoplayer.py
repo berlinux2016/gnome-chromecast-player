@@ -1241,6 +1241,7 @@ class VideoPlayer(Gtk.Box):
         bus.connect("message", self.on_gst_message)
 
         self.current_file = None
+        self.current_uri = None  # URI für Thumbnail-Extraction
         self.hw_accel_enabled = False
         self.info_callback = None
         # Zustand für Video-Infos, um Flackern zu vermeiden
@@ -1314,6 +1315,7 @@ class VideoPlayer(Gtk.Box):
         abs_path = str(Path(filepath).resolve())
         # Korrekte URI mit drei Slashes für absolute Pfade
         uri = f"file:///{abs_path}" if abs_path.startswith('/') else f"file://{abs_path}"
+        self.current_uri = uri  # Speichere URI für Thumbnail-Extraction
         print(f"Lade Video lokal: {abs_path}")
         print(f"URI: {uri}")
         self.playbin.set_state(Gst.State.NULL)
@@ -1365,7 +1367,8 @@ class VideoPlayer(Gtk.Box):
         """Nimmt einen Screenshot des aktuellen Frames"""
         try:
             # Hole das aktuelle Sample vom Sink
-            sample = self.gtksink.get_property("paintable").get_current_frame()
+            # GstGtk4Paintable hat kein get_current_frame, verwende convert-sample stattdessen
+            sample = self.playbin.emit("convert-sample", Gst.Caps.from_string("video/x-raw,format=RGB"))
             if not sample:
                 print("Kein Frame verfügbar für Screenshot")
                 return False
@@ -1463,32 +1466,72 @@ class VideoPlayer(Gtk.Box):
     def get_frame_at_position(self, position_seconds):
         """Extrahiert ein Frame an einer bestimmten Position als Pixbuf für Thumbnails
 
-        HINWEIS: Diese Methode ist vereinfacht und nutzt das aktuelle Frame.
-        Eine vollständige Implementierung würde eine separate Pipeline verwenden.
+        Verwendet eine separate Pipeline für präzises Frame-Extraction ohne
+        die Hauptwiedergabe zu stören.
         """
         try:
-            # Hole aktuelles Frame (als Näherung)
-            # In einer idealen Implementierung würde man eine separate Pipeline mit uridecodebin erstellen
-            sample = self.playbin.emit("convert-sample", Gst.Caps.from_string("video/x-raw,format=RGB"))
+            # Erstelle eine temporäre Pipeline nur für diesen Frame
+            # Dies verhindert, dass wir die Hauptwiedergabe unterbrechen müssen
+            pipeline_str = f'uridecodebin uri="{self.current_uri}" ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=160,height=90 ! appsink name=sink sync=false'
+
+            thumbnail_pipeline = Gst.parse_launch(pipeline_str)
+            appsink = thumbnail_pipeline.get_by_name('sink')
+
+            # Konfiguriere den appsink
+            appsink.set_property('emit-signals', False)
+            appsink.set_property('max-buffers', 1)
+            appsink.set_property('drop', True)
+
+            # Setze Pipeline in PAUSED state
+            thumbnail_pipeline.set_state(Gst.State.PAUSED)
+
+            # Warte bis Pipeline bereit ist
+            ret = thumbnail_pipeline.get_state(5 * Gst.SECOND)
+            if ret[0] != Gst.StateChangeReturn.SUCCESS:
+                thumbnail_pipeline.set_state(Gst.State.NULL)
+                return None
+
+            # Seek zur gewünschten Position
+            seek_flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE | Gst.SeekFlags.KEY_UNIT
+            position_ns = position_seconds * Gst.SECOND
+
+            thumbnail_pipeline.seek_simple(
+                Gst.Format.TIME,
+                seek_flags,
+                position_ns
+            )
+
+            # Warte auf Seek-Completion
+            bus = thumbnail_pipeline.get_bus()
+            msg = bus.timed_pop_filtered(
+                2 * Gst.SECOND,
+                Gst.MessageType.ASYNC_DONE | Gst.MessageType.ERROR
+            )
+
+            if not msg or msg.type == Gst.MessageType.ERROR:
+                thumbnail_pipeline.set_state(Gst.State.NULL)
+                return None
+
+            # Hole Sample vom appsink
+            sample = appsink.emit('pull-preroll')
 
             if sample:
                 buffer = sample.get_buffer()
                 caps = sample.get_caps()
 
-                # Hole Format-Informationen
                 structure = caps.get_structure(0)
                 width = structure.get_value("width")
                 height = structure.get_value("height")
 
-                # Lese Pixel-Daten
                 success, map_info = buffer.map(Gst.MapFlags.READ)
                 if success:
                     try:
-                        data = map_info.data
+                        # Kopiere Daten, da Buffer nach unmap ungültig wird
+                        data = bytes(map_info.data)
 
-                        # Erstelle Pixbuf aus Raw-Daten
-                        pixbuf = GdkPixbuf.Pixbuf.new_from_data(
-                            data,
+                        # Erstelle Pixbuf aus Daten
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(
+                            GLib.Bytes.new(data),
                             GdkPixbuf.Colorspace.RGB,
                             False,
                             8,
@@ -1497,16 +1540,23 @@ class VideoPlayer(Gtk.Box):
                             width * 3
                         )
 
-                        # Skaliere auf Thumbnail-Größe (160x90)
-                        thumbnail = pixbuf.scale_simple(160, 90, GdkPixbuf.InterpType.BILINEAR)
-
-                        return thumbnail
-
-                    finally:
+                        # Pipeline aufräumen
                         buffer.unmap(map_info)
+                        thumbnail_pipeline.set_state(Gst.State.NULL)
+
+                        return pixbuf
+
+                    except Exception as e:
+                        buffer.unmap(map_info)
+                        print(f"Fehler beim Pixbuf-Erstellen: {e}")
+
+            # Pipeline aufräumen
+            thumbnail_pipeline.set_state(Gst.State.NULL)
 
         except Exception as e:
             print(f"Fehler beim Thumbnail-Erstellen: {e}")
+            import traceback
+            traceback.print_exc()
 
         return None
 
@@ -1514,8 +1564,9 @@ class VideoPlayer(Gtk.Box):
         """Extrahiert Kapitel-Informationen aus dem Video"""
         chapters = []
         try:
-            # Versuche TOC (Table of Contents) zu bekommen
-            success, toc = self.playbin.query_toc(Gst.TocScope.GLOBAL)
+            # Versuche TOC (Table of Contents) zu bekommen (get_toc ist die neuere Methode)
+            toc = self.playbin.get_toc()
+            success = toc is not None
             if success and toc:
                 entries = toc.get_entries()
                 for entry in entries:
@@ -1617,19 +1668,19 @@ class VideoPlayer(Gtk.Box):
     def get_subtitle_tracks(self):
         """Gibt eine Liste der verfügbaren Untertitel-Spuren zurück."""
         tracks = []
-        n_text = self.playbin.get_n_text()
+        n_text = self.playbin.get_property('n-text')
         for i in range(n_text):
-            tags = self.playbin.get_text_tags(i)
+            tags = self.playbin.emit('get-text-tags', i)
             if tags:
-                lang, _ = tags.get_string(Gst.TAG_LANGUAGE_CODE)
-                title, _ = tags.get_string(Gst.TAG_TITLE)
-                
+                success_lang, lang = tags.get_string(Gst.TAG_LANGUAGE_CODE)
+                success_title, title = tags.get_string(Gst.TAG_TITLE)
+
                 description = f"Spur {i+1}"
-                if title:
+                if success_title and title:
                     description = title
-                elif lang:
+                elif success_lang and lang:
                     description = f"Spur {i+1} ({lang})"
-                
+
                 tracks.append({"index": i, "description": description})
         return tracks
 
@@ -1977,12 +2028,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     # Aktualisiere UI
                     self.update_playlist_ui()
 
-                    # Starte Wiedergabe des ersten Videos (wenn noch keins spielt)
-                    if self.playlist_manager.current_index == -1 and len(video_files) > 0:
+                    # Wenn die Playlist vorher leer war, lade das erste Video, aber starte es nicht.
+                    # Der Benutzer soll explizit auf Play drücken.
+                    was_empty = self.playlist_manager.get_playlist_length() == len(video_files)
+                    if was_empty:
                         self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - len(video_files))
                         first_video = self.playlist_manager.get_current_video()
                         if first_video:
-                            self.load_video_with_bookmark_check(first_video)
+                            # Lade das Video, aber starte es nicht automatisch
+                            self.load_and_play_video(first_video, autoplay=False)
 
                     self.status_label.set_text(f"{len(video_files)} Video(s) zur Playlist hinzugefügt")
                     return True
@@ -2235,54 +2289,62 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.timeline_scale.set_sensitive(False)  # Deaktiviert bis Video geladen
 
         # Korrekte Event-Handler für Seeking
-        # 'change-value' wird ausgelöst, wenn der Benutzer den Slider bewegt
-        self.timeline_scale.connect("change-value", self.on_timeline_seek)
+        # 'value-changed' wird ausgelöst, wenn der Benutzer den Slider bewegt
+        self.timeline_scale.connect("value-changed", self.on_timeline_seek)
 
-        # Button-Press/Release Events für Drag-Tracking
-        # Verwende GestureClick statt GestureDrag, um Scale nicht zu blockieren
-        click_gesture = Gtk.GestureClick.new()
-        click_gesture.set_button(1)  # Linke Maustaste
-        click_gesture.connect("pressed", self.on_timeline_press)
-        click_gesture.connect("released", self.on_timeline_release)
-        self.timeline_scale.add_controller(click_gesture)
-
-        # Timeline-Thumbnail Popover erstellen
-        self.thumbnail_popover = Gtk.Popover()
-        self.thumbnail_popover.set_parent(self.timeline_scale)
-        self.thumbnail_popover.set_has_arrow(True)
-        self.thumbnail_popover.set_position(Gtk.PositionType.TOP)
-
-        # Thumbnail-Box mit Bild und Zeit-Label
-        thumbnail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        thumbnail_box.set_margin_start(6)
-        thumbnail_box.set_margin_end(6)
-        thumbnail_box.set_margin_top(6)
-        thumbnail_box.set_margin_bottom(6)
-
-        # Bild für Thumbnail
-        self.thumbnail_image = Gtk.Picture()
-        self.thumbnail_image.set_size_request(160, 90)
-        thumbnail_box.append(self.thumbnail_image)
-
-        # Zeit-Label unter dem Thumbnail
-        self.thumbnail_time_label = Gtk.Label(label="00:00")
-        self.thumbnail_time_label.add_css_class("monospace")
-        self.thumbnail_time_label.add_css_class("caption")
-        thumbnail_box.append(self.thumbnail_time_label)
-
-        self.thumbnail_popover.set_child(thumbnail_box)
-
-        # Motion-Controller für Hover-Events
-        motion_controller = Gtk.EventControllerMotion()
-        motion_controller.connect("motion", self.on_timeline_hover)
-        motion_controller.connect("leave", self.on_timeline_leave)
-        self.timeline_scale.add_controller(motion_controller)
+        # Verwende GestureDrag, um den Start und das Ende des Ziehens zuverlässig zu erkennen
+        drag_gesture = Gtk.GestureDrag.new()
+        drag_gesture.set_button(1)  # Nur auf linke Maustaste reagieren
+        drag_gesture.connect("drag-begin", self.on_timeline_drag_begin)
+        drag_gesture.connect("drag-end", self.on_timeline_drag_end)
+        self.timeline_scale.add_controller(drag_gesture)
 
         # Variablen für Thumbnail-Caching
         self.thumbnail_cache = {}
         self.last_thumbnail_position = None
 
-        timeline_box.append(self.timeline_scale)
+        # Verwende Overlay um Motion-Events zuverlässig zu erfassen
+        # während Click/Drag-Events zum Scale durchgereicht werden
+        timeline_overlay = Gtk.Overlay()
+        timeline_overlay.set_hexpand(True)
+        timeline_overlay.set_child(self.timeline_scale)
+
+        # Motion-Controller DIREKT auf dem Overlay-Container
+        # Overlay empfängt Motion-Events, aber leitet Click-Events automatisch an Kind weiter
+        motion_controller = Gtk.EventControllerMotion()
+        motion_controller.connect("motion", self.on_timeline_hover)
+        motion_controller.connect("leave", self.on_timeline_leave)
+        motion_controller.connect("enter", self.on_timeline_enter)
+        timeline_overlay.add_controller(motion_controller)
+
+        # Timeline-Thumbnail Popover erstellen
+        self.thumbnail_popover = Gtk.Popover()
+        self.thumbnail_popover.set_parent(timeline_overlay)
+        self.thumbnail_popover.set_has_arrow(True)
+        self.thumbnail_popover.set_position(Gtk.PositionType.TOP)
+        self.thumbnail_popover.set_autohide(False)  # Nicht automatisch verstecken
+
+        # Thumbnail-Box mit Bild und Zeit-Label
+        thumb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        thumb_box.set_margin_start(6)
+        thumb_box.set_margin_end(6)
+        thumb_box.set_margin_top(6)
+        thumb_box.set_margin_bottom(6)
+
+        # Bild für Thumbnail
+        self.thumbnail_image = Gtk.Picture()
+        self.thumbnail_image.set_size_request(160, 90)
+        thumb_box.append(self.thumbnail_image)
+
+        # Zeit-Label unter dem Thumbnail
+        self.thumbnail_time_label = Gtk.Label(label="00:00")
+        self.thumbnail_time_label.add_css_class("monospace")
+        self.thumbnail_time_label.add_css_class("caption")
+        thumb_box.append(self.thumbnail_time_label)
+
+        self.thumbnail_popover.set_child(thumb_box)
+
+        timeline_box.append(timeline_overlay)
 
         # Dauer-Label rechts (Gesamtdauer)
         self.duration_label = Gtk.Label(label="00:00")
@@ -2380,55 +2442,81 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if position and duration and position > 0:
             self.bookmark_manager.set_bookmark(self.current_video_path, position, duration)
 
-    def on_timeline_press(self, gesture, n_press, x, y):
-        """Wird aufgerufen, wenn der Benutzer die Maustaste auf dem Slider drückt."""
+    def on_timeline_drag_begin(self, gesture, start_x, start_y):
+        """Wird aufgerufen, wenn der Benutzer beginnt, den Slider zu ziehen."""
         self.is_seeking = True
         print("Timeline seeking started")
 
-    def on_timeline_release(self, gesture, n_press, x, y):
-        """Wird aufgerufen, wenn der Benutzer die Maustaste loslässt."""
+    def on_timeline_drag_end(self, gesture, offset_x, offset_y):
+        """Wird aufgerufen, wenn der Benutzer das Ziehen des Sliders beendet."""
         self.is_seeking = False
         print("Timeline seeking ended")
+        # Setze die Position zurück, um ein sofortiges Thumbnail-Update beim nächsten Hover zu erzwingen
+        self.last_thumbnail_position = None
+        # Verstecke das Popover, falls es noch offen ist
+        self.thumbnail_popover.popdown()
 
-    def on_timeline_seek(self, scale, scroll_type, value):
+    def on_timeline_seek(self, scale):
         """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt."""
         duration = self.get_current_duration()
         if duration > 0:
+            value = scale.get_value()
             position_seconds = (value / 100.0) * duration
             self.perform_seek(position_seconds)
             # Aktualisiere das linke Zeit-Label sofort
             self.time_label.set_text(self.format_time(position_seconds))
-        return False # Erlaube dem Signal, weiter zu laufen
+        return False  # Erlaube dem Signal, weiter zu laufen
+
+    def on_timeline_enter(self, controller, _x, _y):
+        """Wird aufgerufen, wenn die Maus die Timeline betritt."""
+        pass
 
     def on_timeline_hover(self, controller, x, y):
         """Wird aufgerufen, wenn die Maus über die Timeline schwebt."""
+        print(f"Timeline hover at ({x:.1f}, {y:.1f})")
+
         # Nur im lokalen Modus und wenn Video geladen ist
         if self.play_mode != "local" or not self.timeline_scale.get_sensitive():
+            print("  -> Skipped: wrong mode or not sensitive")
             return
 
         # Kein Thumbnail anzeigen während gezogen wird
         if self.is_seeking:
+            print("  -> Skipped: seeking")
             return
 
         duration = self.get_current_duration()
         if not duration or duration <= 0:
+            print("  -> Skipped: no duration")
             return
 
-        # Berechne Position basierend auf Maus-X-Koordinate
-        widget_width = self.timeline_scale.get_width()
-        if widget_width <= 0:
-            return
+        # Berechne die Position präzise, indem wir das Gtk.Scale-Widget selbst fragen,
+        # welchem Wert die Mausposition entspricht. Dies vermeidet Abweichungen durch
+        # internes Padding des Widgets.
+        # Wir verwenden hierfür ein internes, undokumentiertes Signal.
+        hover_position = None # Initialisieren
+        try:
+            value = self.timeline_scale.emit("get-value-for-pos", x, y)
+            hover_position = (value / 100.0) * duration
+        except TypeError:
+            # Fallback, falls das Signal nicht existiert oder fehlschlägt
+            widget_width = self.timeline_scale.get_width()
+            progress = max(0.0, min(1.0, x / widget_width)) if widget_width > 0 else 0
+            hover_position = progress * duration
 
-        # Berücksichtige Slider-Margins
-        progress = max(0.0, min(1.0, x / widget_width))
-        hover_position = progress * duration
+        # Stelle sicher, dass hover_position einen Wert hat
+        if hover_position is None:
+            print("  -> Skipped: hover_position konnte nicht berechnet werden.")
+            return
 
         # Nur aktualisieren, wenn Position sich deutlich geändert hat (mindestens 2 Sekunden)
         if self.last_thumbnail_position is not None:
             if abs(hover_position - self.last_thumbnail_position) < 2.0:
+                print(f"  -> Skipped: position change too small ({abs(hover_position - self.last_thumbnail_position):.1f}s)")
                 return
 
         self.last_thumbnail_position = hover_position
+        print(f"  -> Showing thumbnail at {hover_position:.1f}s")
 
         # Zeige Zeit-Label
         self.thumbnail_time_label.set_text(self.format_time(hover_position))
@@ -2438,11 +2526,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         if cache_key in self.thumbnail_cache:
             # Verwende gecachtes Thumbnail
-            pixbuf = self.thumbnail_cache[cache_key]
+            print(f"  -> Using cached thumbnail for {cache_key}s")
+            pixbuf = self.thumbnail_cache.get(cache_key)
+            if not pixbuf:
+                # Sollte nicht passieren, aber zur Sicherheit
+                GLib.idle_add(self.load_thumbnail_async, hover_position, cache_key)
+                return
             texture = Gdk.Texture.new_for_pixbuf(pixbuf)
             self.thumbnail_image.set_paintable(texture)
         else:
             # Lade Thumbnail asynchron
+            print(f"  -> Loading new thumbnail for {cache_key}s")
             GLib.idle_add(self.load_thumbnail_async, hover_position, cache_key)
 
         # Positioniere und zeige Popover
@@ -2452,13 +2546,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         rect.width = 1
         rect.height = 1
         self.thumbnail_popover.set_pointing_to(rect)
+
         self.thumbnail_popover.popup()
+        print(f"  -> Popover shown at ({x:.1f}, {y:.1f})")
 
     def on_timeline_leave(self, controller):
         """Wird aufgerufen, wenn die Maus die Timeline verlässt."""
         self.thumbnail_popover.popdown()
         self.last_thumbnail_position = None
-
     def load_thumbnail_async(self, position, cache_key):
         """Lädt Thumbnail asynchron und cached es."""
         try:
@@ -2468,7 +2563,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.thumbnail_cache[cache_key] = pixbuf
 
                 # Zeige Thumbnail
-                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                # Erstelle eine Gdk.Paintable aus dem Pixbuf
+                # Gdk.Texture.new_for_pixbuf() ist veraltet.
+                # Der empfohlene Weg ist, ein Gtk.Image zu verwenden und dessen Paintable zu bekommen,
+                # aber für diesen Fall ist es einfacher, die veraltete Methode vorerst zu behalten.
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf) # Veraltet, aber funktioniert
                 self.thumbnail_image.set_paintable(texture)
         except Exception as e:
             print(f"Fehler beim Laden des Thumbnails: {e}")
@@ -3506,7 +3605,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Kein Lesezeichen, normal starten
         self.load_and_play_video(filepath)
 
-    def show_resume_dialog(self, filepath, position, duration):
+    def show_resume_dialog(self, filepath, position, duration, autoplay=True):
         """Zeigt Dialog zum Fortsetzen der Wiedergabe"""
         filename = Path(filepath).name
         time_str = self.bookmark_manager.format_time(position)
@@ -3524,16 +3623,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         def on_response(dialog, response):
             if response == "resume":
                 # Lade Video und springe zur Position
-                self.load_and_play_video(filepath, resume_position=position)
+                self.load_and_play_video(filepath, resume_position=position, autoplay=autoplay)
             else:
                 # Von vorne beginnen und Lesezeichen entfernen
                 self.bookmark_manager.remove_bookmark(filepath)
-                self.load_and_play_video(filepath)
+                self.load_and_play_video(filepath, autoplay=autoplay)
 
         dialog.connect("response", on_response)
         dialog.present()
 
-    def load_and_play_video(self, filepath, resume_position=None):
+    def load_and_play_video(self, filepath, resume_position=None, autoplay=True):
         """Lädt und spielt ein Video ab"""
         # Speichere Position des vorherigen Videos
         if self.current_video_path and self.current_video_path != filepath:
@@ -3548,8 +3647,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         if self.play_mode == "local":
             self.video_player.load_video(filepath)
-            self.video_player.play()
-            self.start_timeline_updates()
+            if autoplay:
+                self.video_player.play()
+                self.start_timeline_updates()
             # Info-Overlay vorbereiten
             self.info_label.set_opacity(0.0)
 
@@ -3562,11 +3662,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.ab_button_b.set_sensitive(True)
             self.goto_button.set_sensitive(True)
 
-            # Play-Button aktualisieren
-            self.play_button.set_icon_name("media-playback-pause-symbolic")
-            self.play_button.disconnect_by_func(self.on_play)
-            self.play_button.connect("clicked", self.on_pause)
-
+            if autoplay:
+                # Play-Button aktualisieren
+                self.play_button.set_icon_name("media-playback-pause-symbolic")
+                self.play_button.disconnect_by_func(self.on_play)
+                self.play_button.connect("clicked", self.on_pause)
+            
             self.status_label.set_text(f"Spielt: {filename}")
 
             # Timeline aktivieren nach kurzem Delay
