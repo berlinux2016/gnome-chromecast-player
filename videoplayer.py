@@ -3296,6 +3296,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if not self.thumbnail_popover.get_visible():
             self.thumbnail_popover.popup()
 
+        # Reset auto-hide timer - Popover bleibt offen solange Maus sich bewegt
+        if hasattr(self, '_popover_autohide_timer') and self._popover_autohide_timer:
+            GLib.source_remove(self._popover_autohide_timer)
+
+        # Verstecke Popover automatisch nach 300ms Inaktivität
+        self._popover_autohide_timer = GLib.timeout_add(300, self._auto_hide_popover)
+
         # Berechne Maus-Geschwindigkeit (basierend auf Position-Änderung)
         import time
         current_time = time.time()
@@ -3319,6 +3326,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Längerer Debounce für Thumbnail-Update (500ms statt 300ms)
             new_id = GLib.timeout_add(500, self._update_thumbnail_popover, x, y)
             self.thumbnail_hover_timeout_id = new_id
+
+    def _auto_hide_popover(self):
+        """Versteckt das Popover automatisch nach Inaktivität"""
+        if self.thumbnail_popover.get_visible():
+            self.thumbnail_popover.popdown()
+        self._popover_autohide_timer = None
+        return False
 
     def _update_thumbnail_popover(self, x, y):
         """Interne Funktion, die nur das Thumbnail aktualisiert (nicht die Position)."""
@@ -3370,6 +3384,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Wird aufgerufen, wenn die Maus die Timeline verlässt."""
         # Lasse Timer einfach ablaufen - setze nur ID zurück
         self.thumbnail_hover_timeout_id = None
+
+        # Lösche auch den Auto-Hide-Timer
+        if hasattr(self, '_popover_autohide_timer') and self._popover_autohide_timer:
+            GLib.source_remove(self._popover_autohide_timer)
+            self._popover_autohide_timer = None
+
         self.thumbnail_popover.popdown()
         self.last_thumbnail_position = None
 
@@ -4681,10 +4701,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             current_volume = self.volume_scale.get_value() / 100.0
             self.video_player.set_volume(current_volume)
 
-            # Stoppe Chromecast-Streaming falls aktiv
+            # Speichere aktuelle Chromecast-Position falls Streaming aktiv
+            chromecast_position = None
             if self.cast_manager.mc and self.cast_manager.selected_cast:
                 print("Stoppe Chromecast-Streaming...")
                 try:
+                    # Hole aktuelle Position vom Chromecast
+                    chromecast_position = self.cast_manager.get_position()
+                    if chromecast_position:
+                        print(f"Chromecast-Position gespeichert: {self.format_time(chromecast_position)}")
+
                     self.cast_manager.stop()
                     self.status_label.set_text("Chromecast gestoppt, Modus: Lokal")
                     # Erlaube wieder Standby
@@ -4701,11 +4727,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # für lokale Wiedergabe
                 self.video_player.load_video(self.current_video_path)
 
-                # Gib der Pipeline kurz Zeit, das erste Frame zu laden
-                GLib.timeout_add(100, lambda: (
-                    self.status_label.set_text(f"Lokal bereit: {Path(self.current_video_path).name}"),
-                    False  # Return False to stop the timeout
-                ))
+                # Wenn eine Chromecast-Position vorhanden ist, springe dorthin
+                if chromecast_position and chromecast_position > 0:
+                    print(f"Setze lokale Position auf: {self.format_time(chromecast_position)}")
+                    GLib.timeout_add(500, lambda: (
+                        self.seek_to_position(chromecast_position),
+                        self.status_label.set_text(f"Lokal bereit: {Path(self.current_video_path).name}"),
+                        False
+                    ))
+                else:
+                    # Gib der Pipeline kurz Zeit, das erste Frame zu laden
+                    GLib.timeout_add(100, lambda: (
+                        self.status_label.set_text(f"Lokal bereit: {Path(self.current_video_path).name}"),
+                        False  # Return False to stop the timeout
+                    ))
 
                 print(f"Video '{Path(self.current_video_path).name}' wurde lokal geladen")
                 print("Bereit zur Wiedergabe - drücke Play")
