@@ -12,8 +12,9 @@ import socket
 import re
 import subprocess
 import json
+from enum import Enum
 import hashlib
-import random
+from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import quote
@@ -28,6 +29,12 @@ from gi.repository import Gtk, Adw, Gst, GLib, GstVideo, Gdk, Gio, GdkPixbuf
 import pychromecast
 from zeroconf import Zeroconf
 from pychromecast.controllers.youtube import YouTubeController
+
+class LoopMode(Enum):
+    """Enum für die Wiederholungsmodi der Playlist."""
+    NONE = 0
+    ONE = 1
+    ALL = 2
 
 Gst.init(None)
 
@@ -105,6 +112,8 @@ class ConfigManager:
             "window_height": 700,
             "chromecast_device": None,
             "play_mode": "local",
+            "loop_mode": "NONE",
+            "equalizer": None,
             "hardware_acceleration": True,
             "auto_convert_mkv": True,
             "cache_size_gb": 10,
@@ -117,9 +126,16 @@ class ConfigManager:
                 "seek_backward": "Left",
                 "mute": "m",
                 "next_video": "n",
-                "previous_video": "p"
+                "previous_video": "p",
+                "screenshot": "s",
+                "ab_loop_a": "a",
+                "ab_loop_b": "b",
+                "ab_loop_clear": "c",
+                "goto_time": "g",
+                "toggle_info": "i"
             }
         }
+        self.playlist_file = self.config_dir / "playlist.json"
         self.settings = self.load_settings()
     
     def load_settings(self):
@@ -150,6 +166,24 @@ class ConfigManager:
         """Setzt eine Einstellung"""
         self.settings[key] = value
         self.save_settings()
+
+    def load_playlist(self):
+        """Lädt die letzte Playlist aus einer Datei."""
+        if self.playlist_file.exists():
+            try:
+                with open(self.playlist_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Fehler beim Laden der Playlist: {e}")
+        return []
+
+    def save_playlist(self, playlist):
+        """Speichert die aktuelle Playlist in einer Datei."""
+        try:
+            with open(self.playlist_file, 'w') as f:
+                json.dump(playlist, f)
+        except Exception as e:
+            print(f"Fehler beim Speichern der Playlist: {e}")
 
 
 class BookmarkManager:
@@ -989,15 +1023,25 @@ class PlaylistManager:
     """Verwaltet die Video-Playlist"""
 
     def __init__(self):
-        self.playlist = []  # Liste von Video-Pfaden
+        # Liste von Dictionaries: [{'path': '/path/to/file', 'display': 'filename'}, ...]
+        self.playlist = []
         self.current_index = -1  # Aktueller Index in der Playlist
         self.play_history = []  # Wiedergabeverlauf
         self.playlist_file = None
 
     def add_video(self, video_path):
         """Fügt ein Video zur Playlist hinzu"""
-        if video_path not in self.playlist:
-            self.playlist.append(video_path)
+        # Prüfe, ob der Pfad bereits existiert
+        if not any(item['path'] == video_path for item in self.playlist):
+            display_name = Path(video_path).name
+            # Bei URLs einen lesbareren Namen generieren
+            if video_path.startswith("http"):
+                try:
+                    parsed = urlparse(video_path)
+                    display_name = parse_qs(parsed.query).get('v', [Path(parsed.path).name])[0]
+                except Exception:
+                    pass # Fallback auf den Dateinamen des Pfades
+            self.playlist.append({'path': video_path, 'display': display_name})
             print(f"✓ Video zur Playlist hinzugefügt: {Path(video_path).name}")
             return True
         else:
@@ -1008,7 +1052,7 @@ class PlaylistManager:
         """Entfernt ein Video aus der Playlist"""
         if 0 <= index < len(self.playlist):
             removed = self.playlist.pop(index)
-            print(f"✓ Video aus Playlist entfernt: {Path(removed).name}")
+            print(f"✓ Video aus Playlist entfernt: {removed['display']}")
             # Aktualisiere current_index wenn nötig
             if index < self.current_index:
                 self.current_index -= 1
@@ -1027,7 +1071,7 @@ class PlaylistManager:
     def get_current_video(self):
         """Gibt den Pfad des aktuellen Videos zurück"""
         if 0 <= self.current_index < len(self.playlist):
-            return self.playlist[self.current_index]
+            return self.playlist[self.current_index]['path']
         return None
 
     def next_video(self):
@@ -1071,7 +1115,7 @@ class PlaylistManager:
     def move_video(self, from_index, to_index):
         """Verschiebt ein Video innerhalb der Playlist"""
         if 0 <= from_index < len(self.playlist) and 0 <= to_index < len(self.playlist):
-            video = self.playlist.pop(from_index)
+            video_item = self.playlist.pop(from_index)
             self.playlist.insert(to_index, video)
             # Aktualisiere current_index
             if self.current_index == from_index:
@@ -1089,9 +1133,9 @@ class PlaylistManager:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write("#EXTM3U\n")
                 for video_path in self.playlist:
-                    video_name = Path(video_path).name
+                    video_name = video_path['display']
                     f.write(f"#EXTINF:-1,{video_name}\n")
-                    f.write(f"{video_path}\n")
+                    f.write(f"{video_path['path']}\n")
             self.playlist_file = filepath
             print(f"✓ Playlist gespeichert: {filepath}")
             return True
@@ -1123,7 +1167,7 @@ class PlaylistManager:
         unique_videos = []
         seen = set()
         
-        for video_path in self.playlist:
+        for video_item in self.playlist:
             if video_path not in seen:
                 seen.add(video_path)
                 unique_videos.append(video_path)
@@ -1243,6 +1287,9 @@ class VideoPlayer(Gtk.Box):
         self.current_file = None
         self.current_uri = None  # URI für Thumbnail-Extraction
         self.hw_accel_enabled = False
+        self.streams_ready_callback = None
+        self.toc_ready_callback = None
+        self.eos_callback = None
         self.info_callback = None
         # Zustand für Video-Infos, um Flackern zu vermeiden
         self._video_info = {
@@ -1304,19 +1351,28 @@ class VideoPlayer(Gtk.Box):
 
     def load_video(self, filepath):
         """Lädt eine Video-Datei"""
-        # Setze Video-Infos für neue Datei zurück
+        # Setze Video-Infos für neue Datei/Stream zurück
         self._video_info = {
             "resolution": "N/A",
             "codec": "N/A",
             "bitrate": "N/A"
         }
         self.current_file = filepath
-        # Konvertiere zu absoluten Pfad und erstelle korrekte URI
-        abs_path = str(Path(filepath).resolve())
-        # Korrekte URI mit drei Slashes für absolute Pfade
-        uri = f"file:///{abs_path}" if abs_path.startswith('/') else f"file://{abs_path}"
-        self.current_uri = uri  # Speichere URI für Thumbnail-Extraction
-        print(f"Lade Video lokal: {abs_path}")
+
+        if filepath.startswith(("http://", "https")):
+            uri = filepath
+            self.current_uri = uri
+            print(f"Lade Video-Stream: {uri}")
+        elif filepath.startswith("fd://"):
+            uri = filepath
+            self.current_uri = uri # Für Streams ist die URI auch der "Pfad"
+            print(f"Lade Video-Stream: {uri}")
+        else:
+            abs_path = str(Path(filepath).resolve())
+            uri = f"file:///{abs_path}" if abs_path.startswith('/') else f"file://{abs_path}"
+            self.current_uri = uri
+            print(f"Lade Video lokal: {abs_path}")
+
         print(f"URI: {uri}")
         self.playbin.set_state(Gst.State.NULL)
         self.playbin.set_property("uri", uri)
@@ -1560,49 +1616,41 @@ class VideoPlayer(Gtk.Box):
 
         return None
 
-    def get_chapters(self):
+    def parse_toc(self, toc):
         """Extrahiert Kapitel-Informationen aus dem Video"""
         chapters = []
-        try:
-            # Versuche TOC (Table of Contents) zu bekommen (get_toc ist die neuere Methode)
-            toc = self.playbin.get_toc()
-            success = toc is not None
-            if success and toc:
-                entries = toc.get_entries()
-                for entry in entries:
-                    # Hole Kapitel-Informationen
-                    entry_type = entry.get_entry_type()
-                    if entry_type == Gst.TocEntryType.CHAPTER:
-                        # Hole Start- und Endzeit
-                        success_start, start, stop = entry.get_start_stop_times()
-                        if success_start:
-                            start_seconds = start / Gst.SECOND
+        if not toc:
+            return chapters
 
-                            # Hole Kapitel-Titel
-                            tags = entry.get_tags()
-                            title = f"Kapitel {len(chapters) + 1}"
-                            if tags:
-                                success_title, tag_title = tags.get_string(Gst.TAG_TITLE)
-                                if success_title:
-                                    title = tag_title
+        entries = toc.get_entries()
+        for entry in entries:
+            # Hole Kapitel-Informationen
+            entry_type = entry.get_entry_type()
+            if entry_type == Gst.TocEntryType.CHAPTER:
+                # Hole Start- und Endzeit
+                success_start, start, stop = entry.get_start_stop_times()
+                if success_start:
+                    start_seconds = start / Gst.SECOND
 
-                            chapters.append({
-                                'title': title,
-                                'start': start_seconds,
-                                'index': len(chapters)
-                            })
-                            print(f"Kapitel gefunden: {title} bei {start_seconds:.1f}s")
+                    # Hole Kapitel-Titel
+                    tags = entry.get_tags()
+                    title = f"Kapitel {len(chapters) + 1}"
+                    if tags:
+                        success_title, tag_title = tags.get_string(Gst.TAG_TITLE)
+                        if success_title:
+                            title = tag_title
 
-                if chapters:
-                    print(f"✓ {len(chapters)} Kapitel gefunden")
-                else:
-                    print("ℹ Keine Kapitel im Video gefunden")
-            else:
-                print("ℹ Video hat keine TOC (Table of Contents)")
-
-        except Exception as e:
-            print(f"Fehler beim Lesen der Kapitel: {e}")
-
+                    chapters.append({
+                        'title': title,
+                        'start': start_seconds,
+                        'index': len(chapters)
+                    })
+        
+        if chapters:
+            print(f"✓ {len(chapters)} Kapitel gefunden")
+        else:
+            print("ℹ Keine Kapitel im Video gefunden")
+            
         return chapters
 
     def on_gst_message(self, bus, message):
@@ -1619,6 +1667,12 @@ class VideoPlayer(Gtk.Box):
             taglist = message.parse_tag()
             # Wir rufen die Extraktion auf, die dann die Tags und Caps verarbeitet
             self.extract_video_info(taglist)
+
+        elif t == Gst.MessageType.TOC:
+            toc, _ = message.parse_toc()
+            if toc and hasattr(self, 'toc_ready_callback'):
+                # Sende TOC an die Haupt-UI-Klasse
+                GLib.idle_add(self.toc_ready_callback, toc)
 
         elif t == Gst.MessageType.ASYNC_DONE:
             # Ein guter Zeitpunkt, um nach Untertiteln zu suchen, da die Streams jetzt bekannt sind
@@ -1814,6 +1868,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.ab_loop_a = None  # Start-Position in Sekunden
         self.ab_loop_b = None  # End-Position in Sekunden
 
+        # Picture-in-Picture
+        self.pip_window = None
+
+        # Loop-Modus
+        try:
+            self.loop_mode = LoopMode[self.config.get_setting("loop_mode", "NONE")]
+        except KeyError:
+            self.loop_mode = LoopMode.NONE
+
+        self.last_equalizer_settings = self.config.get_setting("equalizer")
+
         # Cleanup beim Schließen
         self.connect("close-request", self.on_close_request)
 
@@ -1842,6 +1907,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.info_label.set_halign(Gtk.Align.START)
         self.info_label.set_margin_start(10)
         self.info_label.set_margin_top(10)
+        self.info_label.set_margin_top(10)
         self.info_label.add_css_class("info-overlay")
         self.video_overlay.add_overlay(self.info_label)
 
@@ -1867,6 +1933,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Timeline state tracking
         self.timeline_update_timeout = None
         self.is_seeking = False
+        self.timeline_seek_handler_id = 0
+        self.info_overlay_timeout_id = None
+        self.info_overlay_shown_for_current_video = False
 
         # Initialisiere Lautstärke
         saved_volume = self.config.get_setting("volume", 1.0)
@@ -1881,6 +1950,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Setze Callback für Stream-Erkennung (für Untertitel und Audio)
         self.video_player.streams_ready_callback = self.update_media_menus
+
+        # Setze Callback für Kapitel-Erkennung
+        self.video_player.toc_ready_callback = self.update_chapters_menu
 
         # Drag-and-Drop Setup
         self.setup_drag_and_drop()
@@ -1906,6 +1978,18 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Registriere Window-Actions für Menüs
         self.setup_actions()
+
+        # Lade letzte Playlist
+        last_playlist = self.config.load_playlist()
+        if last_playlist:
+            # Konvertiere alte String-Playlists in das neue Dictionary-Format
+            self.playlist_manager.playlist = [
+                item if isinstance(item, dict) else {'path': item, 'display': Path(item).name}
+                for item in last_playlist
+            ]
+            self.update_playlist_ui()
+            print(f"{len(last_playlist)} Video(s) aus letzter Sitzung geladen.")
+
 
     def setup_drop_css(self):
         """Fügt CSS für Drag-and-Drop visuelles Feedback hinzu"""
@@ -2031,7 +2115,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     # Wenn die Playlist vorher leer war, lade das erste Video, aber starte es nicht.
                     # Der Benutzer soll explizit auf Play drücken.
                     was_empty = self.playlist_manager.get_playlist_length() == len(video_files)
-                    if was_empty:
+                    if was_empty and not self.current_video_path:
                         self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - len(video_files))
                         first_video = self.playlist_manager.get_current_video()
                         if first_video:
@@ -2048,13 +2132,19 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def on_video_ended(self):
         """Wird aufgerufen, wenn ein Video zu Ende ist"""
-        print("Video zu Ende - prüfe auf nächstes Video in Playlist")
+        print(f"Video zu Ende - Loop-Modus: {self.loop_mode.name}")
 
-        # Wenn es ein nächstes Video gibt, spiele es ab
-        if self.playlist_manager.has_next():
+        if self.loop_mode == LoopMode.ONE:
+            print("Wiederhole einzelnes Video...")
+            self.seek_to_position(0)
+            self.on_play(None)
+        elif self.loop_mode == LoopMode.ALL:
+            print("Wiederhole Playlist...")
+            if not self.playlist_manager.has_next():
+                # Am Ende der Playlist, springe zum Anfang
+                self.playlist_manager.set_current_index(0)
             next_video = self.playlist_manager.next_video()
             if next_video:
-                print(f"Auto-Advance: Spiele nächstes Video ab")
                 self.load_and_play_video(next_video)
                 self.update_playlist_ui()
         else:
@@ -2065,6 +2155,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Erlaube wieder Standby, da die Wiedergabe beendet ist
             if self.play_mode == "chromecast":
                 self.uninhibit_suspend()
+            # Auto-Advance für LoopMode.NONE
+            elif self.playlist_manager.has_next():
+                print("Auto-Advance: Spiele nächstes Video ab")
+                next_video = self.playlist_manager.next_video()
+                if next_video:
+                    self.load_and_play_video(next_video)
+                    self.update_playlist_ui()
 
     def setup_header_bar(self):
         """Erstellt die Header Bar"""
@@ -2076,6 +2173,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         open_button.set_tooltip_text("Video öffnen")
         open_button.connect("clicked", self.on_open_file)
         header.pack_start(open_button)
+
+        # URL öffnen Button (Netzwerk-Symbol)
+        self.url_button = Gtk.Button()
+        self.url_button.set_icon_name("network-wired-symbolic")
+        self.url_button.set_tooltip_text("Video von URL öffnen (z.B. YouTube)")
+        self.url_button.connect("clicked", self.on_open_url)
+        header.pack_start(self.url_button)
 
         # About Button
         about_button = Gtk.Button()
@@ -2156,6 +2260,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.fullscreen_button.set_tooltip_text("Vollbild (F11)")
         self.fullscreen_button.connect("clicked", self.on_toggle_fullscreen)
         header.pack_end(self.fullscreen_button)
+
+        # Picture-in-Picture Button
+        self.pip_button = Gtk.Button()
+        self.pip_button.set_icon_name("view-app-grid-symbolic") # Platzhalter-Icon
+        self.pip_button.set_tooltip_text("Bild-in-Bild (PiP)")
+        self.pip_button.connect("clicked", self.on_toggle_pip)
+        header.pack_end(self.pip_button)
 
         # Loading Spinner
         self.loading_spinner = Gtk.Spinner()
@@ -2288,10 +2399,6 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.timeline_scale.set_draw_value(False)
         self.timeline_scale.set_sensitive(False)  # Deaktiviert bis Video geladen
 
-        # Korrekte Event-Handler für Seeking
-        # 'value-changed' wird ausgelöst, wenn der Benutzer den Slider bewegt
-        self.timeline_scale.connect("value-changed", self.on_timeline_seek)
-
         # Verwende GestureDrag, um den Start und das Ende des Ziehens zuverlässig zu erkennen
         drag_gesture = Gtk.GestureDrag.new()
         drag_gesture.set_button(1)  # Nur auf linke Maustaste reagieren
@@ -2382,7 +2489,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Slider aktualisieren
         if duration > 0:
             percentage = (position / duration) * 100.0
-            self.timeline_scale.set_value(percentage)
+            # Blockiere das 'value-changed' Signal, um die Seek-Schleife zu verhindern.
+            # Wir verwenden die korrekte Methode, um den Handler zu blockieren/freizugeben.
+            # Der Handler wird in on_timeline_drag_begin verbunden.
+            with self.timeline_scale.freeze_notify():
+                if self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+                    self.timeline_scale.handler_block(self.timeline_seek_handler_id)
+                self.timeline_scale.set_value(percentage)
+                if self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
+                    self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
             if not self.timeline_scale.get_sensitive():
                 self.timeline_scale.set_sensitive(True)
         else:
@@ -2445,12 +2560,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_timeline_drag_begin(self, gesture, start_x, start_y):
         """Wird aufgerufen, wenn der Benutzer beginnt, den Slider zu ziehen."""
         self.is_seeking = True
+        # Verbinde den Handler nur während des Ziehens und speichere die ID
+        self.timeline_seek_handler_id = self.timeline_scale.connect("value-changed", self.on_timeline_seek)
         print("Timeline seeking started")
 
     def on_timeline_drag_end(self, gesture, offset_x, offset_y):
         """Wird aufgerufen, wenn der Benutzer das Ziehen des Sliders beendet."""
         self.is_seeking = False
         print("Timeline seeking ended")
+        self.timeline_scale.handler_disconnect(self.timeline_seek_handler_id)
         # Setze die Position zurück, um ein sofortiges Thumbnail-Update beim nächsten Hover zu erzwingen
         self.last_thumbnail_position = None
         # Verstecke das Popover, falls es noch offen ist
@@ -2473,21 +2591,21 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def on_timeline_hover(self, controller, x, y):
         """Wird aufgerufen, wenn die Maus über die Timeline schwebt."""
-        print(f"Timeline hover at ({x:.1f}, {y:.1f})")
+        # print(f"Timeline hover at ({x:.1f}, {y:.1f})") # Zu gesprächig für normale Logs
 
         # Nur im lokalen Modus und wenn Video geladen ist
         if self.play_mode != "local" or not self.timeline_scale.get_sensitive():
-            print("  -> Skipped: wrong mode or not sensitive")
+            # print("  -> Skipped: wrong mode or not sensitive")
             return
 
         # Kein Thumbnail anzeigen während gezogen wird
         if self.is_seeking:
-            print("  -> Skipped: seeking")
+            # print("  -> Skipped: seeking")
             return
 
         duration = self.get_current_duration()
         if not duration or duration <= 0:
-            print("  -> Skipped: no duration")
+            # print("  -> Skipped: no duration")
             return
 
         # Berechne die Position präzise, indem wir das Gtk.Scale-Widget selbst fragen,
@@ -2512,7 +2630,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Nur aktualisieren, wenn Position sich deutlich geändert hat (mindestens 2 Sekunden)
         if self.last_thumbnail_position is not None:
             if abs(hover_position - self.last_thumbnail_position) < 2.0:
-                print(f"  -> Skipped: position change too small ({abs(hover_position - self.last_thumbnail_position):.1f}s)")
+                # print(f"  -> Skipped: position change too small ({abs(hover_position - self.last_thumbnail_position):.1f}s)")
                 return
 
         self.last_thumbnail_position = hover_position
@@ -2612,18 +2730,6 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.play_button.connect("clicked", self.on_play)
         self.control_box.append(self.play_button)
 
-        # Pause Button
-        pause_button = Gtk.Button()
-        pause_button.set_icon_name("media-playback-pause-symbolic")
-        pause_button.connect("clicked", self.on_pause)
-        self.control_box.append(pause_button)
-
-        # Stop Button
-        stop_button = Gtk.Button()
-        stop_button.set_icon_name("media-playback-stop-symbolic")
-        stop_button.connect("clicked", self.on_stop)
-        self.control_box.append(stop_button)
-
         # Next Button
         self.next_button = Gtk.Button()
         self.next_button.set_icon_name("media-skip-forward-symbolic")
@@ -2633,6 +2739,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.control_box.append(self.next_button)
 
         # A-B Loop Buttons
+        # Loop-Modus Button
+        self.loop_button = Gtk.Button()
+        self.loop_button.connect("clicked", self.on_toggle_loop_mode)
+        self.control_box.append(self.loop_button)
+        # Setze initialen Zustand
+        self.update_loop_button_ui()
+
+
         ab_separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         ab_separator.set_margin_start(12)
         ab_separator.set_margin_end(12)
@@ -2792,21 +2906,25 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_brightness_changed(self, scale):
         """Callback für Helligkeit-Änderung"""
         value = scale.get_value()
+        self.last_equalizer_settings['brightness'] = value
         self.video_player.set_equalizer(brightness=value)
 
     def on_contrast_changed(self, scale):
         """Callback für Kontrast-Änderung"""
         value = scale.get_value()
+        self.last_equalizer_settings['contrast'] = value
         self.video_player.set_equalizer(contrast=value)
 
     def on_saturation_changed(self, scale):
         """Callback für Sättigung-Änderung"""
         value = scale.get_value()
+        self.last_equalizer_settings['saturation'] = value
         self.video_player.set_equalizer(saturation=value)
 
     def on_hue_changed(self, scale):
         """Callback für Farbton-Änderung"""
         value = scale.get_value()
+        self.last_equalizer_settings['hue'] = value
         self.video_player.set_equalizer(hue=value)
 
     def on_equalizer_reset(self, _button):
@@ -2815,6 +2933,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.contrast_scale.set_value(1.0)
         self.saturation_scale.set_value(1.0)
         self.hue_scale.set_value(0.0)
+        self.last_equalizer_settings = None
         self.video_player.reset_equalizer()
 
     def on_set_loop_a(self, _button):
@@ -2887,38 +3006,37 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         current_position = self.get_current_position() or 0
 
-        # Erstelle Dialog
-        dialog = Adw.MessageDialog.new(self)
-        dialog.set_heading("Zu Zeit springen")
-        dialog.set_body("Gib die Zielzeit ein (Format: MM:SS oder HH:MM:SS)")
-
-        # Erstelle Entry für Zeit-Eingabe
-        entry_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        entry_box.set_margin_top(12)
-        entry_box.set_margin_bottom(12)
-        entry_box.set_margin_start(12)
-        entry_box.set_margin_end(12)
-
         time_entry = Gtk.Entry()
         time_entry.set_placeholder_text("z.B. 1:23:45 oder 5:30")
         # Setze aktuelle Zeit als Vorgabe
         time_entry.set_text(self.format_time(current_position))
         time_entry.set_max_width_chars(10)
-        entry_box.append(time_entry)
+        time_entry.set_hexpand(True)
 
-        # Info-Label
+        # Use a Gtk.Box to hold the entry and info label
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content_box.set_margin_top(12)
+        content_box.set_margin_bottom(12)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+        content_box.append(Gtk.Label(label="Gib die Zielzeit ein (Format: MM:SS oder HH:MM:SS)"))
+        content_box.append(time_entry)
+        
         info_label = Gtk.Label(label=f"Video-Dauer: {self.format_time(duration)}")
         info_label.add_css_class("dim-label")
-        entry_box.append(info_label)
+        content_box.append(info_label)
 
-        dialog.set_extra_child(entry_box)
-
+        dialog = Adw.AlertDialog.new(
+            "Zu Zeit springen",
+            None # Body text is in the body_widget
+        )
+        dialog.set_extra_child(content_box)
         dialog.add_response("cancel", "Abbrechen")
         dialog.add_response("jump", "Springen")
         dialog.set_response_appearance("jump", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("jump")
 
-        def on_response(dialog, response):
+        def on_response(d, response):
             if response == "jump":
                 time_str = time_entry.get_text().strip()
                 seconds = self.parse_time_string(time_str)
@@ -2929,7 +3047,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     self.status_label.set_text("Ungültige Zeitangabe")
 
         dialog.connect("response", on_response)
-        dialog.present()
+        dialog.present(self)
 
     def parse_time_string(self, time_str):
         """Konvertiert Zeitstring (MM:SS oder HH:MM:SS) zu Sekunden"""
@@ -2945,6 +3063,227 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 return None
         except (ValueError, AttributeError):
             return None
+
+    def on_toggle_pip(self, _button):
+        """Schaltet den Picture-in-Picture-Modus um."""
+        if self.pip_window:
+            self.exit_pip_mode()
+        else:
+            self.enter_pip_mode()
+
+    def enter_pip_mode(self):
+        """Wechselt in den PiP-Modus.
+
+        Anstatt das Video-Widget zu verschieben (was zu Problemen führt),
+        erstellen wir ein neues Video-Sink für das PiP-Fenster und weisen
+        playbin an, dieses zu verwenden.
+        """
+        # PiP ist verfügbar, wenn ein Video geladen ist (lokal oder URL) und der Modus lokal ist.
+        if not (self.current_video_path or self.video_player.current_file) or self.play_mode != "local":
+            self.status_label.set_text("PiP nur bei lokaler Wiedergabe verfügbar")
+            return
+
+        # PiP-Fenster erstellen
+        self.pip_window = Gtk.Window(application=self.get_application())
+        self.pip_window.set_title("PiP")
+        self.pip_window.set_default_size(320, 180)
+        self.pip_window.set_keep_above(True)
+        self.pip_window.set_decorated(False)
+        self.pip_window.connect("close-request", self.exit_pip_mode)
+
+        # Erstelle ein neues Video-Sink für das PiP-Fenster
+        self.pip_video_sink = Gst.ElementFactory.make("gtk4paintablesink", "pipsink")
+        pip_paintable = self.pip_video_sink.get_property("paintable")
+        pip_picture = Gtk.Picture.new_for_paintable(pip_paintable)
+
+        # Overlay für den "Wiederherstellen"-Button
+        pip_overlay = Gtk.Overlay()
+        pip_overlay.set_child(pip_picture)
+
+        restore_button = Gtk.Button.new_from_icon_name("view-restore-symbolic")
+        restore_button.set_tooltip_text("Vollbild wiederherstellen")
+        restore_button.connect("clicked", self.exit_pip_mode)
+        restore_button.set_halign(Gtk.Align.CENTER)
+        restore_button.set_valign(Gtk.Align.CENTER)
+        restore_button.set_opacity(0.5)
+        pip_overlay.add_overlay(restore_button)
+
+        self.pip_window.set_child(pip_overlay)
+
+        # Wechsle das Video-Sink von playbin zum neuen PiP-Sink
+        self.video_player.playbin.set_property("video-sink", self.pip_video_sink)
+
+        # Hauptfenster verstecken und PiP-Fenster anzeigen
+        self.set_visible(False)
+        self.pip_window.present()
+        print("PiP-Modus aktiviert")
+
+    def exit_pip_mode(self, widget=None):
+        """Beendet den PiP-Modus."""
+        if not self.pip_window:
+            return True
+
+        # Wechsle das Video-Sink zurück zum Hauptfenster
+        self.video_player.playbin.set_property("video-sink", self.video_player.video_bin)
+
+        # Zerstöre das PiP-Fenster und seine Ressourcen
+        self.pip_window.destroy()
+        self.pip_window = None
+        self.pip_video_sink = None
+
+        # Zeige das Hauptfenster wieder an
+        self.set_visible(True)
+        print("PiP-Modus beendet")
+        return True  # Verhindert, dass das Fenster geschlossen wird, wenn über 'x' beendet
+
+    def on_toggle_loop_mode(self, button):
+        """Schaltet durch die Wiederholungsmodi."""
+        if self.loop_mode == LoopMode.NONE:
+            self.loop_mode = LoopMode.ALL
+        elif self.loop_mode == LoopMode.ALL:
+            self.loop_mode = LoopMode.ONE
+        else: # LoopMode.ONE
+            self.loop_mode = LoopMode.NONE
+        
+        self.config.set_setting("loop_mode", self.loop_mode.name)
+        self.update_loop_button_ui()
+
+    def update_loop_button_ui(self):
+        """Aktualisiert Icon und Tooltip des Loop-Buttons."""
+        if self.loop_mode == LoopMode.NONE:
+            self.loop_button.set_icon_name("media-playlist-consecutive-symbolic")
+            self.loop_button.set_tooltip_text("Wiederholung: Aus")
+        elif self.loop_mode == LoopMode.ALL:
+            self.loop_button.set_icon_name("media-playlist-repeat-symbolic")
+            self.loop_button.set_tooltip_text("Wiederholung: Alle")
+        else: # LoopMode.ONE
+            self.loop_button.set_icon_name("media-playlist-repeat-song-symbolic")
+            self.loop_button.set_tooltip_text("Wiederholung: Einzeln")
+
+    def on_open_url(self, button):
+        """Zeigt einen Dialog zum Öffnen einer Video-URL an."""
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("https://www.youtube.com/watch?v=...")
+        entry.set_hexpand(True)
+
+        # Use a Gtk.Box to hold the entry and provide padding
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        entry.set_margin_top(12)
+        entry.set_margin_bottom(12)
+        entry.set_margin_start(12)
+        entry.set_margin_end(12)
+        content_box.append(Gtk.Label(label="Fügen Sie eine URL von YouTube oder einer anderen unterstützten Seite ein."))
+        content_box.append(entry)
+
+        dialog = Adw.AlertDialog.new(
+            "Video von URL öffnen",
+            None # Body text is in the body_widget
+        )
+        dialog.set_extra_child(content_box)
+        dialog.add_response("cancel", "Abbrechen")
+        dialog.add_response("play", "Abspielen")
+        dialog.set_response_appearance("play", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("play")
+        def on_response(d, response):
+            if response == "play":
+                url = entry.get_text().strip()
+                if url and ("http://" in url or "https://" in url):
+                    self.load_from_url(url)
+                else:
+                    self.status_label.set_text("Ungültige URL eingegeben.")
+        
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+    def load_from_url(self, url):
+        """Lädt Metadaten und Stream-URL von einer Webseite."""
+        
+        # Bereinige YouTube-URL von Playlist-Parametern etc.
+        cleaned_url = self.clean_youtube_url(url)
+        if cleaned_url != url:
+            print(f"Bereinigte URL: {cleaned_url}")
+            url = cleaned_url
+
+        self.status_label.set_text("Lade Video-Informationen von URL...")
+        self.loading_spinner.start()
+        self.loading_spinner.set_visible(True)
+        self.url_button.set_sensitive(False) # Verhindere mehrfaches Klicken
+
+        def get_stream_info():
+            try:
+                # Prüfe, ob yt-dlp installiert ist
+                subprocess.run(['yt-dlp', '--version'], check=True, capture_output=True)
+    
+                # Hole Titel
+                title_process = subprocess.run(['yt-dlp', '--no-playlist', '--get-title', '-e', url], capture_output=True, text=True, check=True)
+                title = title_process.stdout.strip()
+    
+                # Hole die direkte Stream-URL für ein kombiniertes Format (Video+Audio)
+                # Dies ermöglicht Seeking. Wir wählen ein Format, das wahrscheinlich kombiniert ist.
+                stream_url_process = subprocess.run(
+                    ['yt-dlp', '--no-playlist', '-f', 'best[ext=mp4]/best', '--get-url', url],
+                    capture_output=True, text=True, check=True
+                )
+                stream_url = stream_url_process.stdout.strip()
+    
+                if not stream_url.startswith("http"):
+                    raise ValueError("yt-dlp hat keine gültige Stream-URL zurückgegeben.")
+    
+                GLib.idle_add(self.on_stream_info_loaded, url, title, stream_url)
+
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                error_message = "Fehler: yt-dlp nicht gefunden oder URL ungültig."
+                if isinstance(e, FileNotFoundError):
+                    error_message = "Fehler: 'yt-dlp' ist nicht installiert. Bitte installieren."
+                print(error_message, e)
+                GLib.idle_add(lambda: (
+                    self.status_label.set_text(error_message),
+                    self.loading_spinner.stop(),
+                    self.loading_spinner.set_visible(False),
+                    self.url_button.set_sensitive(True)
+                ))
+
+        thread = threading.Thread(target=get_stream_info, daemon=True)
+        thread.start()
+
+    def on_stream_info_loaded(self, original_url, title, stream_url):
+        """Wird aufgerufen, wenn die Stream-Infos erfolgreich geladen wurden."""
+        self.loading_spinner.stop()
+        self.loading_spinner.set_visible(False)
+        
+        print(f"Titel: {title}")
+        print(f"Stream-URL erhalten: {stream_url[:70]}...") # Kürze URL für die Ausgabe
+
+        # Füge zur Playlist hinzu (verwende Original-URL als "Pfad")
+        if self.playlist_manager.add_video(original_url):
+            self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - 1)
+        else:
+            index = next((i for i, item in enumerate(self.playlist_manager.playlist) if item['path'] == original_url), -1)
+            self.playlist_manager.set_current_index(index) # Setze existierendes Video als aktuell
+        
+        # Überschreibe den Namen in der Playlist mit dem echten Titel
+        self.playlist_manager.playlist[self.playlist_manager.current_index]['display'] = title
+        self.update_playlist_ui()
+
+        # Spiele den Stream ab
+        self.load_and_play_video(stream_url, is_url=True, title=title)
+
+    def clean_youtube_url(self, url):
+        """Entfernt Playlist- und andere unnötige Parameter von einer YouTube-URL."""
+        if "youtube.com" not in url and "youtu.be" not in url:
+            return url
+        
+        try:
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+            
+            if 'v' in query_params:
+                # Behalte nur den 'v' Parameter
+                return urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, '', urlencode({'v': query_params['v'][0]}), ''))
+        except Exception:
+            pass # Bei Fehler, gib Original-URL zurück
+        return url
+
 
     def on_open_file(self, button):
         """Öffnet Dateiauswahl-Dialog"""
@@ -2978,12 +3317,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.config.set_setting("last_directory", str(Path(filepath).parent))
 
                 # Füge zur Playlist hinzu und setze als aktuell
-                if filepath not in self.playlist_manager.playlist:
-                    self.playlist_manager.add_video(filepath)
+                if self.playlist_manager.add_video(filepath):
                     self.playlist_manager.set_current_index(self.playlist_manager.get_playlist_length() - 1)
                 else:
                     # Setze existierendes Video als aktuell
-                    index = self.playlist_manager.playlist.index(filepath)
+                    index = next((i for i, item in enumerate(self.playlist_manager.playlist) if item['path'] == filepath), -1)
                     self.playlist_manager.set_current_index(index)
 
                 self.update_playlist_ui()
@@ -3191,8 +3529,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if self.play_mode == "local":
             self.video_player.play()
             self.start_timeline_updates()
+            try:
+                self.play_button.disconnect_by_func(self.on_play)
+            except TypeError:
+                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-pause-symbolic")
-            self.play_button.disconnect_by_func(self.on_play)
             self.play_button.connect("clicked", self.on_pause)
         else:
             # Chromecast-Modus - Prüfe den Zustand
@@ -3207,8 +3548,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.cast_manager.play()
                 self.start_timeline_updates()
                 self.inhibit_suspend()
+                try:
+                    self.play_button.disconnect_by_func(self.on_play)
+                except TypeError:
+                    pass # War nicht verbunden
                 self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.play_button.disconnect_by_func(self.on_play)
                 self.play_button.connect("clicked", self.on_pause)
             elif self.current_video_path and self.cast_manager.selected_cast:
                 # Verhindere Standby während Streaming
@@ -3261,8 +3605,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                     self.loading_spinner.stop(),
                                     self.loading_spinner.set_visible(False),
                                     self.play_button.set_sensitive(True),
+                                    (lambda: self.play_button.disconnect_by_func(self.on_play) if self.play_button.handler_is_connected(self.play_button.connect("clicked", self.on_play)) else None)(),
                                     self.play_button.set_icon_name("media-playback-pause-symbolic"),
-                                    self.play_button.disconnect_by_func(self.on_play),
                                     self.play_button.connect("clicked", self.on_pause)
                                 ))
                             else:
@@ -3300,15 +3644,21 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Pausiert die Wiedergabe"""
         if self.play_mode == "local":
             self.video_player.pause()
+            try:
+                self.play_button.disconnect_by_func(self.on_pause)
+            except TypeError:
+                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.play_button.disconnect_by_func(self.on_pause)
             self.play_button.connect("clicked", self.on_play)
         else:
             self.cast_manager.pause()
             # Bei Pause Standby wieder erlauben
             self.uninhibit_suspend()
+            try:
+                self.play_button.disconnect_by_func(self.on_pause)
+            except TypeError:
+                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.play_button.disconnect_by_func(self.on_pause)
             self.play_button.connect("clicked", self.on_play)
 
     def on_stop(self, button):
@@ -3530,7 +3880,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 entry_box.append(icon)
 
             # Video-Name
-            label = Gtk.Label(label=Path(video_path).name)
+            label = Gtk.Label(label=video_path['display'])
             label.set_xalign(0)
             label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
             label.set_hexpand(True)
@@ -3575,7 +3925,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             index = row.video_index
             self.playlist_manager.set_current_index(index)
             video_path = self.playlist_manager.get_current_video()
-            if video_path:
+            if video_path and video_path.startswith("http"):
+                self.load_from_url(video_path)
+            elif video_path:
                 self.load_video_with_bookmark_check(video_path)
 
     def on_next_video(self, button):
@@ -3610,17 +3962,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         filename = Path(filepath).name
         time_str = self.bookmark_manager.format_time(position)
 
-        dialog = Adw.MessageDialog.new(self)
-        dialog.set_heading("Wiedergabe fortsetzen?")
-        dialog.set_body(f"Möchten Sie '{filename}' an der gespeicherten Position ({time_str}) fortsetzen?")
-
+        dialog = Adw.AlertDialog.new(
+            "Wiedergabe fortsetzen?",
+            f"Möchten Sie '{filename}' an der gespeicherten Position ({time_str}) fortsetzen?"
+        )
         dialog.add_response("cancel", "Von Anfang an")
         dialog.add_response("resume", "Fortsetzen")
         dialog.set_response_appearance("resume", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("resume")
         dialog.set_close_response("cancel")
 
-        def on_response(dialog, response):
+        def on_response(d, response):
             if response == "resume":
                 # Lade Video und springe zur Position
                 self.load_and_play_video(filepath, resume_position=position, autoplay=autoplay)
@@ -3630,9 +3982,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.load_and_play_video(filepath, autoplay=autoplay)
 
         dialog.connect("response", on_response)
-        dialog.present()
+        dialog.present(self)
 
-    def load_and_play_video(self, filepath, resume_position=None, autoplay=True):
+    def load_and_play_video(self, filepath, resume_position=None, autoplay=True, is_url=False, title=None):
         """Lädt und spielt ein Video ab"""
         # Speichere Position des vorherigen Videos
         if self.current_video_path and self.current_video_path != filepath:
@@ -3641,15 +3993,39 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Leere Thumbnail-Cache bei neuem Video
         self.thumbnail_cache.clear()
         self.last_thumbnail_position = None
+        
+        # Erlaube, dass das Info-Overlay für das neue Video einmal angezeigt wird
+        self.info_overlay_shown_for_current_video = False
 
-        self.current_video_path = filepath
-        filename = Path(filepath).name
+        if not is_url:
+            self.current_video_path = filepath
+            filename = Path(filepath).name
+        else:
+            # Speichere die Original-URL als "Pfad" für Lesezeichen und andere Funktionen
+            self.current_video_path = filepath # Für YouTube-Streams ist dies die Stream-URL
+            filename = title or "Online Stream"
 
+        # Gespeicherte Equalizer-Einstellungen anwenden
+        if self.last_equalizer_settings:
+            print("Wende gespeicherte Equalizer-Einstellungen an...")
+            self.last_equalizer_settings = self.config.get_setting("equalizer")
+            self.video_player.set_equalizer(**self.last_equalizer_settings)
+            self.update_equalizer_ui()
+        
         if self.play_mode == "local":
+            # Beende einen eventuell laufenden yt-dlp Prozess (falls von alter Methode noch vorhanden)
+            if hasattr(self, 'yt_dlp_process') and self.yt_dlp_process:
+                self.yt_dlp_process.terminate()
+                self.yt_dlp_process = None
+
+            # Lade das Video. Dies funktioniert jetzt für lokale Dateien UND für Stream-URLs.
             self.video_player.load_video(filepath)
+
+            # Starte die Wiedergabe
             if autoplay:
                 self.video_player.play()
                 self.start_timeline_updates()
+
             # Info-Overlay vorbereiten
             self.info_label.set_opacity(0.0)
 
@@ -3664,14 +4040,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
             if autoplay:
                 # Play-Button aktualisieren
+                try:
+                    self.play_button.disconnect_by_func(self.on_play)
+                except TypeError:
+                    pass # War nicht verbunden
                 self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.play_button.disconnect_by_func(self.on_play)
                 self.play_button.connect("clicked", self.on_pause)
             
-            self.status_label.set_text(f"Spielt: {filename}")
+            self.status_label.set_text(f"Spielt: {filename}" if autoplay else f"Bereit: {filename}")
 
             # Timeline aktivieren nach kurzem Delay
-            def enable_timeline():
+            def enable_timeline(is_stream=False):
                 duration = self.video_player.get_duration()
                 if duration > 0:
                     self.timeline_scale.set_sensitive(True)
@@ -3682,9 +4061,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     # Wenn resume_position gesetzt ist, springe dorthin
                     if resume_position:
                         GLib.timeout_add(100, lambda: self.seek_to_position(resume_position))
+                elif is_stream:
+                    # Bei Streams kann die Dauer anfangs 0 sein. Wir aktivieren die Timeline trotzdem.
+                    self.timeline_scale.set_sensitive(True)
                 return False
 
-            GLib.timeout_add(500, enable_timeline)
+            GLib.timeout_add(500, enable_timeline, is_url)
         else:
             # Chromecast-Modus
             if self.cast_manager.selected_cast:
@@ -3715,8 +4097,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                 self.loading_spinner.stop(),
                                 self.loading_spinner.set_visible(False),
                                 self.play_button.set_sensitive(True),
-                                self.play_button.set_icon_name("media-playback-pause-symbolic"),
-                                self.play_button.disconnect_by_func(self.on_play),
+                                self.play_button.set_icon_name("media-playback-pause-symbolic"),                                
+                                (lambda: self.play_button.disconnect_by_func(self.on_play) if self.play_button.handler_is_connected(self.play_button.connect("clicked", self.on_play)) else None)(),
                                 self.play_button.connect("clicked", self.on_pause)
                             ))
                         else:
@@ -3736,6 +4118,71 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
                 thread = threading.Thread(target=start_streaming, daemon=True)
                 thread.start()
+
+    def on_stop(self, button):
+        """Stoppt die Wiedergabe"""
+        if self.play_mode == "local":
+            self.video_player.stop()
+        else:
+            self.cast_manager.stop()
+            self.status_label.set_text("Gestoppt")
+            # Bei Stop Standby wieder erlauben
+            self.uninhibit_suspend()
+
+        # Timeline zurücksetzen
+        self.stop_timeline_updates()
+        self.timeline_scale.set_value(0)
+        self.time_label.set_text("00:00")
+        
+        # Play-Button zurücksetzen
+        self.play_button.set_icon_name("media-playback-start-symbolic")
+        try:
+            self.play_button.disconnect_by_func(self.on_pause)
+        except TypeError:
+            pass # War nicht verbunden
+        try:
+            # Stelle sicher, dass nur ein on_play Handler verbunden ist
+            self.play_button.disconnect_by_func(self.on_play)
+        except TypeError:
+            pass
+        self.play_button.connect("clicked", self.on_play)
+
+
+    
+    def on_key_press_event(self, widget, event):
+        """Behandelt Tastendrücke auf dem Hauptfenster."""
+        keyval = event.get_keyval()[1]
+        shortcuts = self.config.get_setting("keyboard_shortcuts", {})
+
+        # Dynamisches Mapping von Key-Namen zu Gdk.KEY_* Konstanten
+        key_map = {v: getattr(Gdk, f"KEY_{v}") for v in shortcuts.values()}
+
+        action_map = {
+            "fullscreen": lambda: self.on_toggle_fullscreen(None),
+            "play_pause": self.toggle_play_pause,
+            "seek_forward": lambda: self.seek_relative(5),
+            "seek_backward": lambda: self.seek_relative(-5),
+            "volume_up": lambda: self.change_volume_relative(0.05),
+            "volume_down": lambda: self.change_volume_relative(-0.05),
+            "mute": self.toggle_mute,
+            "next_video": lambda: self.on_next_video(None),
+            "previous_video": lambda: self.on_previous_video(None),
+            "screenshot": self.take_screenshot,
+            "ab_loop_a": lambda: self.on_set_loop_a(None) if self.ab_button_a.get_sensitive() else None,
+            "ab_loop_b": lambda: self.on_set_loop_b(None) if self.ab_button_b.get_sensitive() else None,
+            "ab_loop_clear": lambda: self.on_clear_loop(None) if self.ab_button_clear.get_sensitive() else None,
+            "goto_time": lambda: self.on_show_goto_dialog(None) if self.goto_button.get_sensitive() else None,
+            "toggle_info": self.toggle_persistent_info_overlay,
+        }
+
+        for action_name, key_name in shortcuts.items():
+            # Prüfe sowohl Klein- als auch Großschreibung
+            if keyval == key_map.get(key_name) or (key_name.isalpha() and keyval == key_map.get(key_name.upper())):
+                if action_name in action_map:
+                    action_map[action_name]()
+                    return True # Event wurde behandelt
+
+        return False # Event weiterleiten
 
     def on_key_pressed(self, controller, keyval, keycode, state):
         """Behandelt Tastendrücke auf dem Hauptfenster."""
@@ -3797,24 +4244,27 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         elif keyval == key_map.get(shortcuts.get("previous_video", "p"), Gdk.KEY_p):
             self.on_previous_video(None)
             return True
-        elif keyval == key_map.get(shortcuts.get("screenshot", "s"), Gdk.KEY_s):
+        elif keyval == key_map.get(shortcuts.get("screenshot", "s"), Gdk.KEY_s) or keyval == key_map.get(shortcuts.get("screenshot", "s").upper(), Gdk.KEY_S):
             self.take_screenshot()
             return True
-        elif keyval == key_map.get(shortcuts.get("ab_loop_a", "a"), Gdk.KEY_a):
+        elif keyval == key_map.get(shortcuts.get("ab_loop_a", "a"), Gdk.KEY_a) or keyval == key_map.get(shortcuts.get("ab_loop_a", "a").upper(), Gdk.KEY_A):
             if self.ab_button_a.get_sensitive():
                 self.on_set_loop_a(None)
             return True
-        elif keyval == key_map.get(shortcuts.get("ab_loop_b", "b"), Gdk.KEY_b):
+        elif keyval == key_map.get(shortcuts.get("ab_loop_b", "b"), Gdk.KEY_b) or keyval == key_map.get(shortcuts.get("ab_loop_b", "b").upper(), Gdk.KEY_B):
             if self.ab_button_b.get_sensitive():
                 self.on_set_loop_b(None)
             return True
-        elif keyval == key_map.get(shortcuts.get("ab_loop_clear", "c"), Gdk.KEY_c):
+        elif keyval == key_map.get(shortcuts.get("ab_loop_clear", "c"), Gdk.KEY_c) or keyval == key_map.get(shortcuts.get("ab_loop_clear", "c").upper(), Gdk.KEY_C):
             if self.ab_button_clear.get_sensitive():
                 self.on_clear_loop(None)
             return True
-        elif keyval == key_map.get(shortcuts.get("goto_time", "g"), Gdk.KEY_g):
+        elif keyval == key_map.get(shortcuts.get("goto_time", "g"), Gdk.KEY_g) or keyval == key_map.get(shortcuts.get("goto_time", "g").upper(), Gdk.KEY_G):
             if self.goto_button.get_sensitive():
                 self.on_show_goto_dialog(None)
+            return True
+        elif keyval == key_map.get(shortcuts.get("toggle_info", "i"), Gdk.KEY_i) or keyval == key_map.get(shortcuts.get("toggle_info", "i").upper(), Gdk.KEY_I):
+            self.toggle_persistent_info_overlay()
             return True
         return False
 
@@ -3915,23 +4365,55 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             f"<b>Bitrate:</b> {video_info['bitrate']}"
         )
         self.info_label.set_markup(info_text)
+        self.info_label.set_visible(True)
 
-        # Starte den Timer zum Ausblenden nur, wenn das Overlay noch nicht sichtbar ist.
-        # Dies verhindert, dass der Timer bei jeder kleinen Info-Aktualisierung neu startet.
-        if self.info_label.get_opacity() < 1.0:
+        # Wenn das Overlay für dieses Video bereits angezeigt wurde und nicht persistent ist,
+        # dann zeige es nicht erneut an.
+        is_persistent = getattr(self, '_info_overlay_persistent', False)
+        if self.info_overlay_shown_for_current_video and not is_persistent:
+            return # Nichts tun
+
+
+        # Entferne einen eventuell laufenden Timer, um das Ausblenden zurückzusetzen
+        if self.info_overlay_timeout_id:
+            GLib.source_remove(self.info_overlay_timeout_id)
+            self.info_overlay_timeout_id = None
+
+        # Wenn das Overlay dauerhaft angezeigt werden soll, nicht ausblenden
+        is_persistent = getattr(self, '_info_overlay_persistent', False)
+        if not is_persistent:
+            # Standardverhalten: Nach 5 Sekunden ausblenden
             self.info_label.set_opacity(1.0)
-            def hide_overlay():
-                self.info_label.set_opacity(0.0)
-                return False # Nur einmal ausführen
-            GLib.timeout_add_seconds(5, hide_overlay)
+            self.info_overlay_timeout_id = GLib.timeout_add_seconds(5, self.hide_info_overlay)
+            self.info_overlay_shown_for_current_video = True # Markiere als angezeigt
+        else:
+            self.info_label.set_opacity(1.0)
 
+    def toggle_persistent_info_overlay(self):
+        """Schaltet die permanente Anzeige des Info-Overlays um."""
+        is_persistent = not getattr(self, '_info_overlay_persistent', False)
+        self._info_overlay_persistent = is_persistent
+        self.info_label.set_visible(is_persistent)
+        if is_persistent:
+            self.info_label.set_opacity(1.0)
+            self.status_label.set_text("Video-Infos dauerhaft eingeblendet")
+        else:
+            self.status_label.set_text("Video-Infos werden automatisch ausgeblendet")
         return False # Verhindert, dass der Callback erneut aufgerufen wird
+
+    def hide_info_overlay(self):
+        """Versteckt das Info-Overlay und setzt den Timer zurück."""
+        self.info_label.set_opacity(0.0)
+        self.info_overlay_timeout_id = None
+        return False # Timer nur einmal ausführen
+
 
     def update_media_menus(self):
         """Aktualisiert Untertitel-, Audio- und Kapitel-Menüs."""
         self.update_subtitle_menu()
-        self.update_audio_menu()
-        self.update_chapters_menu()
+        self.update_audio_menu() 
+        # Kapitel werden über eine separate TOC-Nachricht (`toc_ready_callback`) behandelt,
+        # daher hier nicht mehr aufrufen.
         return False
 
     def update_subtitle_menu(self):
@@ -3983,12 +4465,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.audio_button.set_sensitive(True)
         return False # Nur einmal ausführen
 
-    def update_chapters_menu(self):
+    def update_chapters_menu(self, toc):
         """Aktualisiert das Kapitel-Menü basierend auf verfügbaren Kapiteln."""
         print("Suche nach Kapiteln...")
-        chapters = self.video_player.get_chapters()
+        chapters = self.video_player.parse_toc(toc)
 
-        if not chapters:
+        if not chapters or len(chapters) == 0:
             print("Keine Kapitel gefunden.")
             self.chapters_button.set_sensitive(False)
             return False
@@ -4048,8 +4530,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             transient_for=self,
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
-            developer_name="DaHool",
-            version="1.8.0",
+            developer_name="DaHool & Gemini",
+            version="1.9.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
@@ -4059,6 +4541,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         )
 
         # Füge Version-Informationen als Credit-Sections hinzu
+        about.add_credit_section(
+            "Was ist neu in Version 1.9.0?",
+            [
+                "Spulen (Seeking) für YouTube-Videos aktiviert",
+                "Stabilitätsverbesserungen für die Timeline",
+                "Verbesserte Logik für das Info-Overlay (verhindert Flackern)",
+                "Zahlreiche Fehlerbehebungen und Code-Optimierungen"
+            ]
+        )
         about.add_credit_section(
             "Was ist neu in Version 1.8.0?",
             [
@@ -4150,6 +4641,12 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Speichere aktuelle Lautstärke
         self.config.set_setting("volume", self.volume_scale.get_value() / 100.0)
 
+        # Speichere Equalizer-Einstellungen
+        if self.last_equalizer_settings:
+            self.config.set_setting("equalizer", self.last_equalizer_settings)
+
+        # Speichere aktuelle Playlist
+        self.config.save_playlist(self.playlist_manager.playlist)
         # Erlaube wieder Standby
         try:
             self.uninhibit_suspend()
