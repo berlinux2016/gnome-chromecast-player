@@ -114,4 +114,3 @@ Der Cache für konvertierte Videos befindet sich in `~/.cache/video-chromecast-p
 
 ---
 
-Entwickelt von DaHool mit Unterstützung von Gemini.
