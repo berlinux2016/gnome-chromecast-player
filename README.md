@@ -662,29 +662,94 @@ Wenn du einen Bug findest:
 2. Einige Video-Codecs benötigen zusätzliche Plugins
 3. Die Anwendung wurde primär für Fedora 43 getestet
 
-## 🚀 Roadmap / Zukünftige Features
+## 🚀 Roadmap / Geplante Features
 
-- [x] **Playlist-Unterstützung** - Mehrere Videos in einer Warteschlange ✓
-- [x] **Vollbild-Modus** - F11 für Vollbild-Wiedergabe ✓
-- [x] **Drag-and-Drop** - Videos einfach in das Fenster ziehen ✓
-- [x] **Video-Info-Overlay** - Codec, Bitrate, Auflösung anzeigen ✓
-- [x] **Lautstärkeregelung** - Lokale und Chromecast Lautstärke-Kontrolle ✓
-- [x] **Untertitel-Support** - SRT, ASS, VTT Dateien ✓
-- [x] **Tastatur-Shortcuts** - Space (Play/Pause), Pfeiltasten (Seek), etc. ✓
-- [x] **Abspiellisten-Import** - M3U/PLS Format-Support ✓
-- [x] **Audio-Track-Auswahl** - Bei mehrsprachigen Videos ✓
-- [x] **Lesezeichen/Resume-Funktion** - Automatisches Speichern und Fortsetzen ✓
-- [x] **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x ✓
-- [x] **Screenshot-Funktion** - Frame-Capture mit S-Taste ✓
-- [x] **Video-Equalizer** - Helligkeit, Kontrast, Sättigung, Farbton ✓
-- [x] **A-B Loop** - Wiederholungsschleife für Lern-Videos ✓
-- [x] **Go-To-Zeit** - Sprung zu bestimmter Zeitposition ✓
-- [x] **Kapitel-Erkennung** - Automatische Erkennung von MKV/MP4 Kapiteln ✓
-- [x] **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline ✓
-- [x] **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos ✓
-- [x] **Picture-in-Picture** - Schwebendes Mini-Fenster ✓
-- [x] **Untertitel-Editor** - Inline-Bearbeitung von Untertiteln ✓
-- [x] **Playlist-Schleifen** - Loop-Modus für Playlists ✓
+### 🎨 Video-Effekte & Verarbeitung
+- [ ] **Video-Rotation & Spiegelung** - Drehen (90°, 180°, 270°) und spiegeln (horizontal/vertikal)
+- [ ] **Crop & Zoom** - Dynamisches Zuschneiden und Zoomen während der Wiedergabe
+- [ ] **Filter-Presets** - Vordefinierte Effekte (Sepia, Schwarz-Weiß, Vintage)
+- [ ] **Gamma-Korrektur** - Erweiterte Gamma-Anpassung für bessere Darstellung
+- [ ] **RGB-Kanal-Kontrolle** - Individuelle Einstellung von Rot-, Grün- und Blau-Kanälen
+
+### 📋 Playlist-Management
+- [ ] **Playlist-Suche** - Schnelles Filtern und Suchen in der Playlist
+- [ ] **Smart Playlists** - Automatische Playlists (Zuletzt gespielt, Meistgeschaut)
+- [ ] **Playlist-Kategorien** - Organisation mit Tags und Kategorien
+- [ ] **Sortier-Optionen** - Nach Name, Größe, Datum, Dauer sortieren
+- [ ] **Playlist-Statistiken** - Gesamtdauer, Anzahl Videos, durchschnittliche Länge
+- [ ] **Netzwerk-Playlisten** - HTTP-URLs für M3U-Playlists unterstützen
+
+### 📡 Erweiterte Streaming-Features
+- [ ] **Twitch Integration** - Live-Streams und VODs direkt abspielen
+- [ ] **Vimeo Support** - Native Vimeo-Video-Unterstützung
+- [ ] **Dailymotion Support** - Dailymotion-Videos streamen
+- [ ] **HLS Adaptive Streaming** - Automatische Qualitätsanpassung bei Bandbreitenwechsel
+- [ ] **Batch-URL-Download** - Mehrere URLs gleichzeitig laden
+- [ ] **Stream-Recorder** - Live-Streams aufzeichnen
+
+### 🎯 Benutzerfreundlichkeit
+- [ ] **Kontextmenü** - Rechtsklick-Menü mit häufigen Aktionen
+- [ ] **Tastatur-Shortcuts-Hilfe** - Visuelle Übersicht aller Shortcuts (H-Taste)
+- [ ] **Schnell-Einstellungen-Panel** - Dashboard mit häufig genutzten Einstellungen
+- [ ] **Fenster-Position speichern** - Automatisches Merken der Fensterposition
+- [ ] **Gesten-Steuerung** - Touch-Gesten für Tablets und Touchscreens
+- [ ] **Dunkelmodus-Umschalter** - Manueller Toggle zwischen Hell/Dunkel-Theme
+
+### ⚡ Power-User Features
+- [ ] **Segment-Export** - Video-Segmente von A nach B exportieren
+- [ ] **Batch-Konvertierung** - Mehrere Videos gleichzeitig konvertieren
+- [ ] **Frame-Stepping** - Einzelne Frames vor/zurück (</> Tasten)
+- [ ] **Metadaten-Editor** - Bearbeitung von Video-Tags, Titel, Beschreibung
+- [ ] **Codec-Analyse** - Detaillierte Codec-Informationen und Bitrate-Graphen
+- [ ] **Markierungs-System** - Custom Marker für wichtige Zeitpunkte
+- [ ] **GIF-Export** - Video-Segmente als animierte GIFs exportieren
+- [ ] **Vergleichsmodus** - Zwei Videos nebeneinander vergleichen
+
+### 📊 Visualisierung & Statistiken
+- [ ] **Bitrate-Graph** - Visueller Verlauf der Video-Bitrate
+- [ ] **FPS-Anzeige** - Aktuelle Framerate in Echtzeit
+- [ ] **CPU/GPU-Monitoring** - Systemressourcen-Auslastung anzeigen
+- [ ] **Puffer-Status** - Detaillierte Anzeige des Puffer-Prozentsatzes
+- [ ] **Kapitel-Minimap** - Visuelle Kapitel-Marker auf Timeline
+- [ ] **Audio-Waveform** - Audio-Wellenform-Visualisierung
+- [ ] **Thumbnail-Grid** - Storyboard-Ansicht aller Video-Thumbnails
+
+### 🔧 Chromecast-Erweiterungen
+- [ ] **Chromecast-Untertitel** - Untertitel-Steuerung auf Remote-Gerät
+- [ ] **Chromecast-Audio-Tracks** - Audio-Spur-Auswahl für Chromecast
+- [ ] **Multi-Room-Audio** - Synchronisierte Wiedergabe auf mehreren Geräten
+- [ ] **Chromecast-Gruppen** - Unterstützung für Audio-Gruppen
+- [ ] **Erweiterte Status-Anzeige** - Detaillierte Chromecast-Informationen
+
+### 🌐 Netzwerk & Integration
+- [ ] **DLNA/UPnP Support** - Netzwerk-Medienserver-Integration
+- [ ] **SMB/NFS Support** - Direkte Wiedergabe von Netzwerk-Shares
+- [ ] **Cloud-Speicher** - OneDrive, Google Drive, Dropbox Integration
+- [ ] **Auto-Subtitle-Download** - Automatischer Download von OpenSubtitles.org
+
+### 🎵 Audio-Features
+- [ ] **Audio-Equalizer** - Bass, Treble, und Multi-Band EQ
+- [ ] **Audio-Normalisierung** - Automatische Lautstärke-Anpassung
+- [ ] **Surround-Sound** - 5.1/7.1 Audio-Spatialisierung
+- [ ] **Audio-Track-Export** - Audio-Spuren als separate Dateien exportieren
+
+### ⌨️ Zusätzliche Tastatur-Shortcuts
+- [ ] **J/L Tasten** - -10/+10 Sekunden Seek (VLC-Style)
+- [ ] **0-9 Tasten** - Sprung zu 0%-90% der Video-Länge
+- [ ] **+/- Tasten** - Wiedergabegeschwindigkeit erhöhen/verringern
+- [ ] **T Taste** - Untertitel Ein/Aus Toggle
+- [ ] **H Taste** - Shortcuts-Hilfe anzeigen
+- [ ] **[/] Tasten** - Zoom In/Out
+- [ ] **Ctrl+O** - Datei öffnen Dialog
+- [ ] **Ctrl+U** - URL-Dialog öffnen
+- [ ] **Ctrl+Q** - Anwendung beenden
+
+### 🔄 Import/Export
+- [ ] **Einstellungs-Backup** - Export/Import von Konfigurationen
+- [ ] **Lesezeichen-Export** - Backup aller Wiedergabepositionen
+- [ ] **Untertitel-Extraktion** - Untertitel aus Videos extrahieren
+- [ ] **Kapitel-Export** - Kapitel-Informationen exportieren (JSON/XML)
+- [ ] **Metadaten-Export** - Video-Informationen als CSV/JSON
 
 ## 📊 Version History
 
