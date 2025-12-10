@@ -3592,20 +3592,37 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         self.control_box.append(volume_box)
 
-        # Mode Toggle
-        mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Mode Toggle - Prominent mit Icons
+        mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         mode_box.set_margin_start(24)
+        mode_box.add_css_class("card")  # Gibt dem Modus-Switcher einen Rahmen
+        mode_box.set_margin_top(6)
+        mode_box.set_margin_bottom(6)
+        mode_box.set_margin_start(12)
+        mode_box.set_margin_end(12)
 
-        mode_label = Gtk.Label(label="Modus:")
+        # Lokal Icon
+        local_icon = Gtk.Image.new_from_icon_name("computer-symbolic")
+        mode_box.append(local_icon)
+
+        mode_label = Gtk.Label(label="<b>Wiedergabe-Modus:</b>")
+        mode_label.set_use_markup(True)
         mode_box.append(mode_label)
 
         self.mode_switch = Gtk.Switch()
         self.mode_switch.set_active(self.play_mode == "chromecast")
         self.mode_switch.connect("notify::active", self.on_mode_changed)
+        self.mode_switch.set_tooltip_text("Zwischen lokaler Wiedergabe und Chromecast umschalten")
         mode_box.append(self.mode_switch)
 
-        self.mode_label = Gtk.Label(label="Lokal" if self.play_mode == "local" else "Chromecast")
+        self.mode_label = Gtk.Label()
+        self.mode_label.set_use_markup(True)
+        self._update_mode_label()
         mode_box.append(self.mode_label)
+
+        # Chromecast Icon
+        chromecast_icon = Gtk.Image.new_from_icon_name("network-wireless-symbolic")
+        mode_box.append(chromecast_icon)
 
         self.control_box.append(mode_box)
 
@@ -4522,13 +4539,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.status_label.set_text(f"Verbindung fehlgeschlagen")
         return False
 
+    def _update_mode_label(self):
+        """Aktualisiert das Modus-Label mit Farbe und Formatierung"""
+        if self.play_mode == "chromecast":
+            self.mode_label.set_markup('<span foreground="#4A90E2"><b>Chromecast</b></span>')
+        else:
+            self.mode_label.set_markup('<span foreground="#7CB342"><b>Lokal</b></span>')
+
     def on_mode_changed(self, switch, gparam):
         """Wechselt zwischen lokalem und Chromecast-Modus"""
         if switch.get_active():
             # Wechsel zu Chromecast-Modus
             self.play_mode = "chromecast"
             self.config.set_setting("play_mode", "chromecast")
-            self.mode_label.set_text("Chromecast")
+            self._update_mode_label()
 
             # Stoppe lokale Wiedergabe falls aktiv
             current_state = self.video_player.playbin.get_state(0).state
@@ -4558,7 +4582,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Wechsel zu Lokal-Modus
             self.play_mode = "local"
             self.config.set_setting("play_mode", "local")
-            self.mode_label.set_text("Lokal")
+            self._update_mode_label()
 
             # Synchronisiere Lautstärke zum lokalen Player
             current_volume = self.volume_scale.get_value() / 100.0
