@@ -4530,7 +4530,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             transient_for=self,
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
-            developer_name="DaHool & Gemini",
+            developer_name="DaHool",
             version="1.9.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",

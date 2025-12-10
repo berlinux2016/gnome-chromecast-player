@@ -113,5 +113,3 @@ Die Anwendung speichert ihre Einstellungen automatisch in `~/.config/video-chrom
 Der Cache für konvertierte Videos befindet sich in `~/.cache/video-chromecast-player/`.
 
 ---
-
-Entwickelt von DaHool mit Unterstützung von Gemini.
