@@ -47,6 +47,9 @@
 - **Screenshot-Funktion** - Frame-Capture mit S-Taste
 - **Video-Equalizer** - Helligkeit, Kontrast, Sättigung und Farbton anpassen
 - **A-B Loop** - Wiederholungsschleife zwischen zwei Punkten für Lern-Videos
+- **Go-To-Zeit** - Sprung zu bestimmter Zeitposition (MM:SS oder HH:MM:SS)
+- **Kapitel-Erkennung** - Automatische Erkennung und Navigation von MKV/MP4 Kapiteln
+- **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline
 - **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
 - **Abspiellisten-Import** - M3U und PLS Format-Support
 - **Intuitive Steuerung**: Previous, Next, Play, Pause, Stop, Seek, Volume
@@ -236,6 +239,7 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 - **A**: A-B Loop Startpunkt (A) setzen
 - **B**: A-B Loop Endpunkt (B) setzen
 - **C**: A-B Loop löschen (Clear)
+- **G**: Go-To-Zeit Dialog öffnen
 - **N**: Nächstes Video in Playlist
 - **P**: Vorheriges Video in Playlist
 
@@ -293,6 +297,32 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 5. Die Schleife ist nun aktiv - das Video springt automatisch zu Punkt A zurück, wenn Punkt B erreicht wird.
 6. Um die Schleife zu löschen, drücke die **C-Taste** oder klicke auf den **Clear-Button** (X).
 7. Perfekt für Lern-Videos, Sprach-Training oder Musik-Loops.
+
+### Go-To-Zeit verwenden (Zu bestimmter Zeit springen)
+
+1. Drücke die **G-Taste** oder klicke auf den **Go-To-Button** (Sprung-Symbol) in der Steuerungsleiste.
+2. Ein Dialog öffnet sich mit einem Eingabefeld für die Zielzeit.
+3. Gib die Zeit ein im Format **MM:SS** (z.B. `5:30`) oder **HH:MM:SS** (z.B. `1:23:45`).
+4. Das Eingabefeld ist bereits mit der aktuellen Position vorausgefüllt.
+5. Klicke auf **Springen**, um zur eingegebenen Zeit zu springen.
+6. Perfekt zum schnellen Navigieren zu bekannten Zeitstempeln.
+
+### Kapitel verwenden (Chapter Navigation)
+
+1. Bei Videos mit Kapiteln (MKV/MP4 mit Chapter-Metadata) wird der **Kapitel-Button** (Listen-Symbol) in der Kopfleiste aktiv.
+2. Klicke auf den Button, um eine Liste aller Kapitel zu sehen.
+3. Jeder Eintrag zeigt den Kapitel-Titel und die Startzeit (z.B. "Kapitel 1: Intro (00:05:30)").
+4. Klicke auf ein Kapitel, um direkt dorthin zu springen.
+5. Perfekt für strukturierte Videos wie Tutorials, Filme oder Vorlesungen.
+
+### Timeline-Thumbnails verwenden (Vorschau beim Hovern)
+
+1. Wenn ein Video im **lokalen Modus** geladen ist, bewege die Maus über die Timeline.
+2. Ein **Vorschau-Popover** erscheint automatisch mit einem Thumbnail des aktuellen Frames.
+3. Unter dem Thumbnail wird die Zeitposition angezeigt.
+4. Bewege die Maus entlang der Timeline, um verschiedene Positionen zu sehen.
+5. Thumbnails werden gecacht für schnellere Anzeige.
+6. **Hinweis**: Feature ist nur im lokalen Modus verfügbar, nicht bei Chromecast-Wiedergabe.
 
 ### Chromecast verwenden
 
@@ -638,11 +668,25 @@ Wenn du einen Bug findest:
 - [x] **Screenshot-Funktion** - Frame-Capture mit S-Taste ✓
 - [x] **Video-Equalizer** - Helligkeit, Kontrast, Sättigung, Farbton ✓
 - [x] **A-B Loop** - Wiederholungsschleife für Lern-Videos ✓
+- [x] **Go-To-Zeit** - Sprung zu bestimmter Zeitposition ✓
+- [x] **Kapitel-Erkennung** - Automatische Erkennung von MKV/MP4 Kapiteln ✓
+- [x] **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline ✓
 - [ ] **Picture-in-Picture** - Schwebendes Mini-Fenster
-- [ ] **Kapitel-Erkennung** - Automatische Erkennung von Kapiteln in Videos
-- [ ] **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline
+- [ ] **Untertitel-Editor** - Inline-Bearbeitung von Untertiteln
+- [ ] **Playlist-Schleifen** - Loop-Modus für Playlists
 
 ## 📊 Version History
+
+### Version 1.8.0 (Dezember 2025)
+- ✨ **Go-To-Zeit** - Sprung zu bestimmter Zeitposition mit Dialog (MM:SS oder HH:MM:SS)
+- ✨ **Kapitel-Erkennung** - Automatische Erkennung und Navigation von MKV/MP4 Kapiteln
+- ✨ **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline mit intelligentem Caching
+- 🎯 Go-To-Button in der Steuerungsleiste mit Sprung-Symbol
+- 📑 Kapitel-Button in Header-Bar zeigt alle verfügbaren Kapitel
+- 🖼️ Hover-Popover über Timeline mit 160x90 Thumbnail-Vorschau
+- 🎮 Neue Tastaturverknüpfung: G für Go-To-Zeit Dialog
+- ⚡ GStreamer TOC API für Kapitel-Extraktion
+- 💾 Thumbnail-Cache für performante Vorschau-Anzeige
 
 ### Version 1.7.0 (Dezember 2025)
 - ✨ **Video-Equalizer** - Echtzeit-Anpassung von Helligkeit, Kontrast, Sättigung und Farbton

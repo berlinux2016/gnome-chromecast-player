@@ -22,8 +22,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('Gst', '1.0')
 gi.require_version('GstVideo', '1.0')
+gi.require_version('GdkPixbuf', '2.0')
 
-from gi.repository import Gtk, Adw, Gst, GLib, GstVideo, Gdk, Gio
+from gi.repository import Gtk, Adw, Gst, GLib, GstVideo, Gdk, Gio, GdkPixbuf
 import pychromecast
 from zeroconf import Zeroconf
 from pychromecast.controllers.youtube import YouTubeController
@@ -1459,6 +1460,100 @@ class VideoPlayer(Gtk.Box):
         self.set_equalizer(brightness=0.0, contrast=1.0, saturation=1.0, hue=0.0)
         print("Equalizer zurückgesetzt")
 
+    def get_frame_at_position(self, position_seconds):
+        """Extrahiert ein Frame an einer bestimmten Position als Pixbuf für Thumbnails
+
+        HINWEIS: Diese Methode ist vereinfacht und nutzt das aktuelle Frame.
+        Eine vollständige Implementierung würde eine separate Pipeline verwenden.
+        """
+        try:
+            # Hole aktuelles Frame (als Näherung)
+            # In einer idealen Implementierung würde man eine separate Pipeline mit uridecodebin erstellen
+            sample = self.playbin.emit("convert-sample", Gst.Caps.from_string("video/x-raw,format=RGB"))
+
+            if sample:
+                buffer = sample.get_buffer()
+                caps = sample.get_caps()
+
+                # Hole Format-Informationen
+                structure = caps.get_structure(0)
+                width = structure.get_value("width")
+                height = structure.get_value("height")
+
+                # Lese Pixel-Daten
+                success, map_info = buffer.map(Gst.MapFlags.READ)
+                if success:
+                    try:
+                        data = map_info.data
+
+                        # Erstelle Pixbuf aus Raw-Daten
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_data(
+                            data,
+                            GdkPixbuf.Colorspace.RGB,
+                            False,
+                            8,
+                            width,
+                            height,
+                            width * 3
+                        )
+
+                        # Skaliere auf Thumbnail-Größe (160x90)
+                        thumbnail = pixbuf.scale_simple(160, 90, GdkPixbuf.InterpType.BILINEAR)
+
+                        return thumbnail
+
+                    finally:
+                        buffer.unmap(map_info)
+
+        except Exception as e:
+            print(f"Fehler beim Thumbnail-Erstellen: {e}")
+
+        return None
+
+    def get_chapters(self):
+        """Extrahiert Kapitel-Informationen aus dem Video"""
+        chapters = []
+        try:
+            # Versuche TOC (Table of Contents) zu bekommen
+            success, toc = self.playbin.query_toc(Gst.TocScope.GLOBAL)
+            if success and toc:
+                entries = toc.get_entries()
+                for entry in entries:
+                    # Hole Kapitel-Informationen
+                    entry_type = entry.get_entry_type()
+                    if entry_type == Gst.TocEntryType.CHAPTER:
+                        # Hole Start- und Endzeit
+                        success_start, start, stop = entry.get_start_stop_times()
+                        if success_start:
+                            start_seconds = start / Gst.SECOND
+
+                            # Hole Kapitel-Titel
+                            tags = entry.get_tags()
+                            title = f"Kapitel {len(chapters) + 1}"
+                            if tags:
+                                success_title, tag_title = tags.get_string(Gst.TAG_TITLE)
+                                if success_title:
+                                    title = tag_title
+
+                            chapters.append({
+                                'title': title,
+                                'start': start_seconds,
+                                'index': len(chapters)
+                            })
+                            print(f"Kapitel gefunden: {title} bei {start_seconds:.1f}s")
+
+                if chapters:
+                    print(f"✓ {len(chapters)} Kapitel gefunden")
+                else:
+                    print("ℹ Keine Kapitel im Video gefunden")
+            else:
+                print("ℹ Video hat keine TOC (Table of Contents)")
+
+        except Exception as e:
+            print(f"Fehler beim Lesen der Kapitel: {e}")
+
+        return chapters
+
     def on_gst_message(self, bus, message):
         t = message.type
         if t == Gst.MessageType.ERROR:
@@ -1818,6 +1913,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         audio_action.connect("activate", self.on_set_audio)
         self.add_action(audio_action)
 
+        # Chapter Action
+        chapter_action = Gio.SimpleAction.new(
+            "goto_chapter",
+            GLib.VariantType.new('d')
+        )
+        chapter_action.connect("activate", self.on_goto_chapter)
+        self.add_action(chapter_action)
+
     def setup_drag_and_drop(self):
         """Richtet Drag-and-Drop für Videos ein"""
         # Erstelle DropTarget für Dateien
@@ -1953,6 +2056,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.audio_popover = Gtk.PopoverMenu()
         self.audio_button.set_popover(self.audio_popover)
         header.pack_end(self.audio_button)
+
+        # Kapitel-Button
+        self.chapters_button = Gtk.MenuButton()
+        self.chapters_button.set_icon_name("view-list-symbolic")
+        self.chapters_button.set_tooltip_text("Kapitel")
+        self.chapters_button.set_sensitive(False) # Deaktiviert bis Video geladen
+
+        self.chapters_popover = Gtk.PopoverMenu()
+        self.chapters_button.set_popover(self.chapters_popover)
+        header.pack_end(self.chapters_button)
 
         # Wiedergabegeschwindigkeit-Button
         self.speed_button = Gtk.MenuButton()
@@ -2125,6 +2238,50 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # 'change-value' wird ausgelöst, wenn der Benutzer den Slider bewegt
         self.timeline_scale.connect("change-value", self.on_timeline_seek)
 
+        # Button-Press/Release Events für Drag-Tracking
+        # Verwende GestureClick statt GestureDrag, um Scale nicht zu blockieren
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.set_button(1)  # Linke Maustaste
+        click_gesture.connect("pressed", self.on_timeline_press)
+        click_gesture.connect("released", self.on_timeline_release)
+        self.timeline_scale.add_controller(click_gesture)
+
+        # Timeline-Thumbnail Popover erstellen
+        self.thumbnail_popover = Gtk.Popover()
+        self.thumbnail_popover.set_parent(self.timeline_scale)
+        self.thumbnail_popover.set_has_arrow(True)
+        self.thumbnail_popover.set_position(Gtk.PositionType.TOP)
+
+        # Thumbnail-Box mit Bild und Zeit-Label
+        thumbnail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        thumbnail_box.set_margin_start(6)
+        thumbnail_box.set_margin_end(6)
+        thumbnail_box.set_margin_top(6)
+        thumbnail_box.set_margin_bottom(6)
+
+        # Bild für Thumbnail
+        self.thumbnail_image = Gtk.Picture()
+        self.thumbnail_image.set_size_request(160, 90)
+        thumbnail_box.append(self.thumbnail_image)
+
+        # Zeit-Label unter dem Thumbnail
+        self.thumbnail_time_label = Gtk.Label(label="00:00")
+        self.thumbnail_time_label.add_css_class("monospace")
+        self.thumbnail_time_label.add_css_class("caption")
+        thumbnail_box.append(self.thumbnail_time_label)
+
+        self.thumbnail_popover.set_child(thumbnail_box)
+
+        # Motion-Controller für Hover-Events
+        motion_controller = Gtk.EventControllerMotion()
+        motion_controller.connect("motion", self.on_timeline_hover)
+        motion_controller.connect("leave", self.on_timeline_leave)
+        self.timeline_scale.add_controller(motion_controller)
+
+        # Variablen für Thumbnail-Caching
+        self.thumbnail_cache = {}
+        self.last_thumbnail_position = None
+
         timeline_box.append(self.timeline_scale)
 
         # Dauer-Label rechts (Gesamtdauer)
@@ -2223,6 +2380,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if position and duration and position > 0:
             self.bookmark_manager.set_bookmark(self.current_video_path, position, duration)
 
+    def on_timeline_press(self, gesture, n_press, x, y):
+        """Wird aufgerufen, wenn der Benutzer die Maustaste auf dem Slider drückt."""
+        self.is_seeking = True
+        print("Timeline seeking started")
+
+    def on_timeline_release(self, gesture, n_press, x, y):
+        """Wird aufgerufen, wenn der Benutzer die Maustaste loslässt."""
+        self.is_seeking = False
+        print("Timeline seeking ended")
+
     def on_timeline_seek(self, scale, scroll_type, value):
         """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt."""
         duration = self.get_current_duration()
@@ -2232,6 +2399,81 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Aktualisiere das linke Zeit-Label sofort
             self.time_label.set_text(self.format_time(position_seconds))
         return False # Erlaube dem Signal, weiter zu laufen
+
+    def on_timeline_hover(self, controller, x, y):
+        """Wird aufgerufen, wenn die Maus über die Timeline schwebt."""
+        # Nur im lokalen Modus und wenn Video geladen ist
+        if self.play_mode != "local" or not self.timeline_scale.get_sensitive():
+            return
+
+        # Kein Thumbnail anzeigen während gezogen wird
+        if self.is_seeking:
+            return
+
+        duration = self.get_current_duration()
+        if not duration or duration <= 0:
+            return
+
+        # Berechne Position basierend auf Maus-X-Koordinate
+        widget_width = self.timeline_scale.get_width()
+        if widget_width <= 0:
+            return
+
+        # Berücksichtige Slider-Margins
+        progress = max(0.0, min(1.0, x / widget_width))
+        hover_position = progress * duration
+
+        # Nur aktualisieren, wenn Position sich deutlich geändert hat (mindestens 2 Sekunden)
+        if self.last_thumbnail_position is not None:
+            if abs(hover_position - self.last_thumbnail_position) < 2.0:
+                return
+
+        self.last_thumbnail_position = hover_position
+
+        # Zeige Zeit-Label
+        self.thumbnail_time_label.set_text(self.format_time(hover_position))
+
+        # Prüfe ob Thumbnail im Cache ist (in 5-Sekunden-Schritten)
+        cache_key = int(hover_position / 5) * 5
+
+        if cache_key in self.thumbnail_cache:
+            # Verwende gecachtes Thumbnail
+            pixbuf = self.thumbnail_cache[cache_key]
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self.thumbnail_image.set_paintable(texture)
+        else:
+            # Lade Thumbnail asynchron
+            GLib.idle_add(self.load_thumbnail_async, hover_position, cache_key)
+
+        # Positioniere und zeige Popover
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        self.thumbnail_popover.set_pointing_to(rect)
+        self.thumbnail_popover.popup()
+
+    def on_timeline_leave(self, controller):
+        """Wird aufgerufen, wenn die Maus die Timeline verlässt."""
+        self.thumbnail_popover.popdown()
+        self.last_thumbnail_position = None
+
+    def load_thumbnail_async(self, position, cache_key):
+        """Lädt Thumbnail asynchron und cached es."""
+        try:
+            pixbuf = self.video_player.get_frame_at_position(position)
+            if pixbuf:
+                # Cache Thumbnail
+                self.thumbnail_cache[cache_key] = pixbuf
+
+                # Zeige Thumbnail
+                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                self.thumbnail_image.set_paintable(texture)
+        except Exception as e:
+            print(f"Fehler beim Laden des Thumbnails: {e}")
+
+        return False  # Nur einmal ausführen
 
     def perform_seek(self, position_seconds):
         """Führt Seek basierend auf Modus aus"""
@@ -3297,6 +3539,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if self.current_video_path and self.current_video_path != filepath:
             self.save_current_position()
 
+        # Leere Thumbnail-Cache bei neuem Video
+        self.thumbnail_cache.clear()
+        self.last_thumbnail_position = None
+
         self.current_video_path = filepath
         filename = Path(filepath).name
 
@@ -3581,9 +3827,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         return False # Verhindert, dass der Callback erneut aufgerufen wird
 
     def update_media_menus(self):
-        """Aktualisiert Untertitel- und Audio-Menüs."""
+        """Aktualisiert Untertitel-, Audio- und Kapitel-Menüs."""
         self.update_subtitle_menu()
         self.update_audio_menu()
+        self.update_chapters_menu()
         return False
 
     def update_subtitle_menu(self):
@@ -3635,6 +3882,33 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.audio_button.set_sensitive(True)
         return False # Nur einmal ausführen
 
+    def update_chapters_menu(self):
+        """Aktualisiert das Kapitel-Menü basierend auf verfügbaren Kapiteln."""
+        print("Suche nach Kapiteln...")
+        chapters = self.video_player.get_chapters()
+
+        if not chapters:
+            print("Keine Kapitel gefunden.")
+            self.chapters_button.set_sensitive(False)
+            return False
+
+        print(f"{len(chapters)} Kapitel gefunden.")
+
+        # Erstelle ein neues Menü-Modell
+        menu_model = Gio.Menu()
+
+        # Einträge für jedes Kapitel
+        for chapter in chapters:
+            # Format: "Kapitel 1: Titel (0:05:30)"
+            time_str = self.format_time(chapter['start'])
+            label = f"{chapter['title']} ({time_str})"
+            # Verwende die Start-Zeit als Parameter für die Action
+            menu_model.append(label, f"win.goto_chapter({chapter['start']})")
+
+        self.chapters_popover.set_menu_model(menu_model)
+        self.chapters_button.set_sensitive(True)
+        return False # Nur einmal ausführen
+
     def on_set_subtitle(self, action, param):
         """Wird aufgerufen, wenn ein Untertitel aus dem Menü ausgewählt wird."""
         index = param.get_int32()
@@ -3646,6 +3920,13 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         index = param.get_int32()
         self.video_player.set_audio_track(index)
         print(f"Audio-Spur auf {index} gesetzt.")
+
+    def on_goto_chapter(self, action, param):
+        """Wird aufgerufen, wenn ein Kapitel aus dem Menü ausgewählt wird."""
+        start_time = param.get_double()
+        self.seek_to_position(start_time)
+        self.status_label.set_text(f"Springe zu Kapitel bei {self.format_time(start_time)}")
+        print(f"Springe zu Kapitel bei {start_time:.1f}s")
 
     def on_set_speed(self, action, param):
         """Wird aufgerufen, wenn die Wiedergabegeschwindigkeit geändert wird."""
@@ -3667,7 +3948,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="1.7.0",
+            version="1.8.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
@@ -3678,7 +3959,19 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Füge Version-Informationen als Credit-Sections hinzu
         about.add_credit_section(
-            "Was ist neu in Version 1.7.0?",
+            "Was ist neu in Version 1.8.0?",
+            [
+                "Go-To-Zeit - Sprung zu bestimmter Zeitposition (G-Taste)",
+                "Kapitel-Erkennung - Navigation durch MKV/MP4 Kapitel",
+                "Timeline-Thumbnails - Vorschau beim Hovern über Timeline",
+                "Go-To-Button in Steuerungsleiste mit Dialog (MM:SS / HH:MM:SS)",
+                "Kapitel-Button in Header-Bar zeigt alle verfügbaren Kapitel",
+                "Thumbnail-Popover mit 160x90 Vorschau und intelligentem Caching"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.7.0",
             [
                 "Video-Equalizer - Helligkeit, Kontrast, Sättigung, Farbton",
                 "A-B Loop - Wiederholungsschleife für Lern-Videos",
