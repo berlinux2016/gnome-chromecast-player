@@ -61,9 +61,9 @@ def detect_gpu():
                 gpu_info['vram'] = int(vram.strip())
             print(f"✓ NVIDIA GPU: {gpu_info['name']} ({gpu_info['vram']}MB)")
             return gpu_info
-    
-    except:
-        pass
+
+    except Exception as e:
+        print(f"ℹ NVIDIA GPU-Erkennung fehlgeschlagen: {e}")
     
     try:
         # AMD/Intel mit lspci
@@ -86,8 +86,8 @@ def detect_gpu():
                             gpu_info['name'] = line.split(':', 1)[1].strip()
                     print(f"✓ Intel GPU: {gpu_info['name']}")
                     return gpu_info
-    except:
-        pass
+    except Exception as e:
+        print(f"ℹ AMD/Intel GPU-Erkennung fehlgeschlagen: {e}")
     
     print("ℹ Keine spezifische GPU erkannt, nutze AMD-Einstellungen")
     os.environ['LIBVA_DRIVER_NAME'] = 'radeonsi'
@@ -894,28 +894,61 @@ class ChromecastManager:
             print("  Warte auf Chromecast-Antwort...")
             self.mc.block_until_active(timeout=10)
 
-            # Robuste Überprüfung, ob die Wiedergabe wirklich startet (wichtig für Xiaomi TV)
-            for attempt in range(10):  # Versuche es bis zu 10 Sekunden lang
+            # Robuste Überprüfung, ob die Wiedergabe wirklich startet
+            # Wenn TV ausgeschaltet war, kann Aufwachen 30+ Sekunden dauern!
+            max_attempts = 45  # 45 Sekunden Timeout (für TV-Aufwachen)
+            print(f"  Warte bis zu {max_attempts} Sekunden auf Wiedergabe-Start...")
+
+            for attempt in range(max_attempts):
                 time.sleep(1) # Warte eine Sekunde zwischen den Prüfungen
-                self.selected_cast.media_controller.update_status()
-                status = self.mc.status.player_state
+
+                try:
+                    self.selected_cast.media_controller.update_status()
+                    status = self.mc.status.player_state
+                except Exception as e:
+                    if attempt % 5 == 0:
+                        print(f"  Versuch {attempt + 1}/{max_attempts}: Fehler beim Status-Update: {e}")
+                    continue
 
                 if status in ("PLAYING", "BUFFERING"):
-                    print(f"✓ Streaming erfolgreich gestartet!")
+                    print(f"✓ Streaming erfolgreich gestartet nach {attempt + 1} Sekunden!")
                     print(f"  Status: {status}")
                     if self.mc.status.duration:
                         print(f"  Dauer: {self.mc.status.duration} Sekunden")
                     return True
                 elif status == "IDLE":
-                    print(f"  Versuch {attempt + 1}/10: Status ist IDLE, warte weiter...")
+                    # Bei TV-Aufwachen kann es lange IDLE bleiben
+                    if attempt < 30:
+                        if attempt % 5 == 0:  # Nur alle 5 Sekunden loggen
+                            print(f"  Versuch {attempt + 1}/{max_attempts}: Status ist IDLE, warte weiter (TV wacht möglicherweise auf)...")
+                    else:
+                        print(f"  Versuch {attempt + 1}/{max_attempts}: Status ist IDLE, warte weiter...")
+
                     # Manchmal hilft ein erneuter Play-Befehl
                     if attempt == 3:
                         print("  ... sende erneuten Play-Befehl als 'Anstoß'.")
-                        self.mc.play()
+                        try:
+                            self.mc.play()
+                        except Exception as e:
+                            print(f"  ... Fehler beim Play-Befehl: {e}")
+                    elif attempt == 15:
+                        print("  ... sende zweiten Play-Befehl (TV könnte jetzt bereit sein).")
+                        try:
+                            self.mc.play()
+                        except Exception as e:
+                            print(f"  ... Fehler beim Play-Befehl: {e}")
+                    elif attempt == 30:
+                        print("  ... sende dritten Play-Befehl (letzter Versuch).")
+                        try:
+                            self.mc.play()
+                        except Exception as e:
+                            print(f"  ... Fehler beim Play-Befehl: {e}")
                 else:
-                    print(f"  Versuch {attempt + 1}/10: Status ist {status}, warte...")
+                    if attempt % 5 == 0:  # Nur alle 5 Sekunden loggen
+                        print(f"  Versuch {attempt + 1}/{max_attempts}: Status ist '{status}', warte...")
 
-            print("✗ Wiedergabe konnte nicht gestartet werden. Status bleibt IDLE/UNKNOWN.")
+            print(f"✗ Wiedergabe konnte nicht gestartet werden nach {max_attempts} Sekunden.")
+            print("  Möglicherweise ist der TV ausgeschaltet oder Chromecast reagiert nicht.")
             return False
         except Exception as e:
             print(f"\n✗ Streaming fehlgeschlagen: {e}")
@@ -1594,8 +1627,39 @@ class VideoPlayer(Gtk.Box):
         self.setup_performance_optimizations()
 
     def setup_performance_optimizations(self):
-        """Setzt Performance-Optimierungen"""
-        pass
+        """Setzt Performance-Optimierungen für GStreamer Pipeline"""
+        if not self.playbin:
+            return
+
+        # Buffer-Größe für Netzwerk-Streams optimieren
+        self.playbin.set_property("buffer-size", 5 * 1024 * 1024)  # 5MB Buffer
+        self.playbin.set_property("buffer-duration", 2 * Gst.SECOND)  # 2s Buffer
+
+        # Ring-Buffer für bessere Performance
+        flags = self.playbin.get_property("flags")
+        flags |= 0x00000001  # GST_PLAY_FLAG_BUFFERING
+        self.playbin.set_property("flags", flags)
+
+        # Setze Video-Sink Eigenschaften für bessere Performance
+        if hasattr(self, 'gtksink') and self.gtksink:
+            # Doppelte Pufferung für flüssigere Wiedergabe
+            self.gtksink.set_property("sync", True)
+
+        print("✓ Performance-Optimierungen aktiviert (5MB Buffer, 2s Buffering)")
+
+    def reconnect_play_button(self, new_handler):
+        """Sauberes Reconnecting des Play-Buttons ohne Memory Leaks"""
+        # Disconnect alter Handler wenn vorhanden
+        if self.play_button_handler_id is not None:
+            try:
+                self.play_button.disconnect(self.play_button_handler_id)
+            except:
+                pass  # Handler war bereits disconnected
+            self.play_button_handler_id = None
+
+        # Connect neuer Handler
+        self.play_button_handler_id = self.play_button.connect("clicked", new_handler)
+
     def setup_element(self, element, name):
         """Helper function to create and check for GStreamer elements."""
         elem = Gst.ElementFactory.make(name, None)
@@ -1667,8 +1731,8 @@ class VideoPlayer(Gtk.Box):
                 self.thumbnail_pipeline.set_state(Gst.State.NULL)
                 self.thumbnail_pipeline = None
                 self.thumbnail_appsink = None
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠ Fehler beim Cleanup der Thumbnail-Pipeline: {e}")
 
         # Setze Video-Infos für neue Datei/Stream zurück
         self._video_info = {
@@ -1713,8 +1777,8 @@ class VideoPlayer(Gtk.Box):
                 self.thumbnail_pipeline.set_state(Gst.State.NULL)
                 self.thumbnail_pipeline = None
                 self.thumbnail_appsink = None
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠ Fehler beim Cleanup der Thumbnail-Pipeline: {e}")
 
     def set_playback_rate(self, rate):
         """Setzt die Wiedergabegeschwindigkeit (0.5 = halbe, 2.0 = doppelte Geschwindigkeit)"""
@@ -2064,8 +2128,17 @@ class VideoPlayer(Gtk.Box):
     def _init_thumbnail_pipeline(self):
         """Initialisiert eine wiederverwendbare Pipeline für Thumbnails"""
         try:
+            # Cleanup alte Pipeline gründlich
             if hasattr(self, 'thumbnail_pipeline') and self.thumbnail_pipeline:
-                self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                try:
+                    self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                    # Warte auf vollständigen Shutdown
+                    self.thumbnail_pipeline.get_state(1 * Gst.SECOND)
+                except Exception as e:
+                    print(f"⚠ Warnung beim Pipeline-Cleanup: {e}")
+                finally:
+                    self.thumbnail_pipeline = None
+                    self.thumbnail_appsink = None
 
             pipeline_str = f'uridecodebin uri="{self.current_uri}" ! videoconvert ! videoscale ! video/x-raw,format=RGB,width=160,height=90 ! appsink name=sink sync=false'
 
@@ -2080,16 +2153,22 @@ class VideoPlayer(Gtk.Box):
             # Setze Pipeline in PAUSED state (nur einmal!)
             self.thumbnail_pipeline.set_state(Gst.State.PAUSED)
 
-            # Warte bis bereit (nur beim ersten Mal)
-            ret = self.thumbnail_pipeline.get_state(3 * Gst.SECOND)
+            # Warte bis bereit mit Timeout (reduziert von 3s auf 2s)
+            ret = self.thumbnail_pipeline.get_state(2 * Gst.SECOND)
             if ret[0] != Gst.StateChangeReturn.SUCCESS:
+                print(f"⚠ Thumbnail-Pipeline Timeout oder Fehler: {ret[0]}")
                 self.thumbnail_pipeline.set_state(Gst.State.NULL)
                 self.thumbnail_pipeline = None
                 return False
 
             return True
         except Exception as e:
-            print(f"Fehler beim Initialisieren der Thumbnail-Pipeline: {e}")
+            print(f"⚠ Fehler beim Initialisieren der Thumbnail-Pipeline: {e}")
+            if hasattr(self, 'thumbnail_pipeline') and self.thumbnail_pipeline:
+                try:
+                    self.thumbnail_pipeline.set_state(Gst.State.NULL)
+                except:
+                    pass
             self.thumbnail_pipeline = None
             return False
 
@@ -2157,20 +2236,21 @@ class VideoPlayer(Gtk.Box):
                             width * 3
                         )
 
-                        buffer.unmap(map_info)
                         return pixbuf
-
                     except Exception as e:
+                        print(f"⚠ Fehler beim Erstellen des Pixbuf: {e}")
+                        return None
+                    finally:
+                        # WICHTIG: Buffer IMMER unmappen um Memory Leak zu vermeiden
                         buffer.unmap(map_info)
-                        print(f"Fehler beim Pixbuf-Erstellen: {e}")
 
         except Exception as e:
             print(f"Fehler beim Thumbnail-Erstellen: {e}")
             # Bei Fehler Pipeline neu initialisieren
             try:
                 self._init_thumbnail_pipeline()
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠ Fehler beim Neuinitialisieren der Thumbnail-Pipeline: {e}")
 
         return None
 
@@ -2511,6 +2591,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self._scrubbing_update_timer = None # NEU: Timer für kontinuierliches Polling während Drag
         self._live_scrub_timeout = None # NEU: Timer für vereinfachtes Live-Scrubbing
 
+        # Signal Handler IDs für sauberes Cleanup
+        self.play_button_handler_id = None
+        self.pause_button_handler_id = None
+
         # Initialisiere Lautstärke
         saved_volume = self.config.get_setting("volume", 1.0)
         self.video_player.set_volume(saved_volume)
@@ -2573,6 +2657,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def setup_drop_css(self):
         """Fügt CSS für Drag-and-Drop visuelles Feedback hinzu"""
+        # Signal Handler IDs für Play-Button (Memory Leak Prevention)
+        self.play_button_handler_id = None
+
         css_provider = Gtk.CssProvider()
         css = b"""
         .drop-active {
@@ -3069,6 +3156,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.thumbnail_queue = Queue()
         self.thumbnail_thread = None
         self.thumbnail_thread_running = False
+        # Lock für thread-safe Zugriff auf thumbnail_cache
+        self.thumbnail_cache_lock = threading.Lock()
         self._start_thumbnail_worker()
 
         # Verwende Overlay um Motion-Events zuverlässig zu erfassen
@@ -3402,12 +3491,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         self.last_thumbnail_position = cache_key  # Speichere Cache-Key, nicht hover_position
 
-        if cache_key in self.thumbnail_cache:
-            # Verwende gecachtes Thumbnail
+        # Thread-safe Cache-Zugriff
+        with self.thumbnail_cache_lock:
             pixbuf = self.thumbnail_cache.get(cache_key)
-            if pixbuf:
-                texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-                self.thumbnail_image.set_paintable(texture)
+
+        if pixbuf:
+            # Verwende gecachtes Thumbnail
+            texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self.thumbnail_image.set_paintable(texture)
         else:
             # Lade Thumbnail asynchron
             GLib.idle_add(self.load_thumbnail_async, cache_key, cache_key, x, y)
@@ -3452,8 +3543,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     pixbuf = self.video_player.get_frame_at_position(position)
 
                     if pixbuf:
-                        # Cache Thumbnail (thread-safe da dict-writes atomar sind in CPython)
-                        self.thumbnail_cache[cache_key] = pixbuf
+                        # Cache Thumbnail mit Lock für Thread-Safety
+                        with self.thumbnail_cache_lock:
+                            self.thumbnail_cache[cache_key] = pixbuf
 
                         # Update UI im Main-Thread mit Popover-Position
                         GLib.idle_add(self._display_thumbnail, pixbuf, x, y)
@@ -4787,6 +4879,19 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         else:
             self.mode_label.set_markup('<span foreground="#7CB342"><b>Lokal</b></span>')
 
+    def reconnect_play_button(self, new_handler):
+        """Sauberes Reconnecting des Play-Buttons ohne Memory Leaks"""
+        # Disconnect alter Handler wenn vorhanden
+        if self.play_button_handler_id is not None:
+            try:
+                self.play_button.disconnect(self.play_button_handler_id)
+            except:
+                pass  # Handler war bereits disconnected
+            self.play_button_handler_id = None
+
+        # Connect neuer Handler
+        self.play_button_handler_id = self.play_button.connect("clicked", new_handler)
+
     def on_mode_changed(self, switch, gparam):
         """Wechselt zwischen lokalem und Chromecast-Modus"""
         if switch.get_active():
@@ -4826,6 +4931,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if current_state in (Gst.State.PLAYING, Gst.State.PAUSED):
                 print("Stoppe lokale Wiedergabe...")
                 self.video_player.stop()
+
+            # Aktualisiere Play-Button auf "Play" da Chromecast-Streaming
+            # erst mit Play-Button gestartet werden muss
+            self.reconnect_play_button(self.on_play)
+            self.play_button.set_icon_name("media-playback-start-symbolic")
 
             # Synchronisiere Lautstärke zum Chromecast
             if self.cast_manager.selected_cast:
@@ -4881,14 +4991,33 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # für lokale Wiedergabe
                 self.video_player.load_video(self.current_video_path)
 
+                # Aktualisiere Play-Button auf "Play" (nicht "Pause")
+                # da das Video gestoppt/pausiert ist
+                self.reconnect_play_button(self.on_play)
+                self.play_button.set_icon_name("media-playback-start-symbolic")
+
                 # Wenn eine Chromecast-Position vorhanden ist, springe dorthin
                 if chromecast_position and chromecast_position > 0:
                     print(f"Setze lokale Position auf: {self.format_time(chromecast_position)}")
-                    GLib.timeout_add(500, lambda: (
-                        self.seek_to_position(chromecast_position),
-                        self.status_label.set_text(f"Lokal bereit: {Path(self.current_video_path).name}"),
-                        False
-                    ))
+
+                    def delayed_seek():
+                        """Wartet bis Pipeline bereit ist und seeked dann"""
+                        try:
+                            # Prüfe ob Pipeline bereit ist
+                            state = self.video_player.playbin.get_state(1 * Gst.SECOND)
+                            if state[0] in (Gst.StateChangeReturn.SUCCESS, Gst.StateChangeReturn.NO_PREROLL):
+                                print(f"Pipeline bereit, seeked zu {self.format_time(chromecast_position)}")
+                                self.seek_to_position(chromecast_position)
+                                self.status_label.set_text(f"Lokal bereit: {Path(self.current_video_path).name}")
+                            else:
+                                print(f"Pipeline noch nicht bereit, warte noch 500ms...")
+                                # Versuche es nochmal nach 500ms
+                                return True  # Timer weiterlaufen lassen
+                        except Exception as e:
+                            print(f"Fehler beim Seek: {e}")
+                        return False  # Timer stoppen
+
+                    GLib.timeout_add(1000, delayed_seek)
                 else:
                     # Gib der Pipeline kurz Zeit, das erste Frame zu laden
                     GLib.timeout_add(100, lambda: (
@@ -5013,9 +5142,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                     self.loading_spinner.stop(),
                                     self.loading_spinner.set_visible(False),
                                     self.play_button.set_sensitive(True),
-                                    (lambda: self.play_button.disconnect_by_func(self.on_play) if self.play_button.handler_is_connected(self.play_button.connect("clicked", self.on_play)) else None)(),
-                                    self.play_button.set_icon_name("media-playback-pause-symbolic"),
-                                    self.play_button.connect("clicked", self.on_pause)
+                                    self.reconnect_play_button(self.on_pause),
+                                    self.play_button.set_icon_name("media-playback-pause-symbolic")
                                 ))
                             else:
                                 GLib.idle_add(lambda: (
@@ -5541,9 +5669,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                 self.loading_spinner.stop(),
                                 self.loading_spinner.set_visible(False),
                                 self.play_button.set_sensitive(True),
-                                self.play_button.set_icon_name("media-playback-pause-symbolic"),                                
-                                (lambda: self.play_button.disconnect_by_func(self.on_play) if self.play_button.handler_is_connected(self.play_button.connect("clicked", self.on_play)) else None)(),
-                                self.play_button.connect("clicked", self.on_pause)
+                                self.reconnect_play_button(self.on_pause),
+                                self.play_button.set_icon_name("media-playback-pause-symbolic")
                             ))
                         else:
                             GLib.idle_add(lambda: (
