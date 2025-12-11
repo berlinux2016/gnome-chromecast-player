@@ -261,6 +261,70 @@ class BookmarkManager:
         return f"{mins:02d}:{secs:02d}"
 
 
+class RecentFilesManager:
+    """Verwaltet zuletzt geöffnete Dateien"""
+
+    def __init__(self, max_items=10):
+        self.recent_files_dir = Path.home() / ".config" / "video-chromecast-player"
+        self.recent_files_file = self.recent_files_dir / "recent_files.json"
+        self.recent_files_dir.mkdir(exist_ok=True)
+        self.max_items = max_items
+        self.recent_files = self.load_recent_files()
+
+    def load_recent_files(self):
+        """Lädt die Liste der zuletzt geöffneten Dateien"""
+        if self.recent_files_file.exists():
+            try:
+                with open(self.recent_files_file, 'r') as f:
+                    data = json.load(f)
+                    # Filtere nur existierende Dateien
+                    return [item for item in data if Path(item['path']).exists()]
+            except Exception as e:
+                print(f"Fehler beim Laden der Recent Files: {e}")
+        return []
+
+    def save_recent_files(self):
+        """Speichert die Liste der zuletzt geöffneten Dateien"""
+        try:
+            with open(self.recent_files_file, 'w') as f:
+                json.dump(self.recent_files, f, indent=2)
+        except Exception as e:
+            print(f"Fehler beim Speichern der Recent Files: {e}")
+
+    def add_recent_file(self, video_path):
+        """Fügt eine Datei zur Recent Files Liste hinzu"""
+        abs_path = str(Path(video_path).resolve())
+
+        # Prüfe ob Datei existiert
+        if not Path(abs_path).exists():
+            return
+
+        # Entferne doppelte Einträge
+        self.recent_files = [item for item in self.recent_files if item['path'] != abs_path]
+
+        # Füge neuen Eintrag am Anfang hinzu
+        import time
+        self.recent_files.insert(0, {
+            'path': abs_path,
+            'filename': Path(abs_path).name,
+            'timestamp': time.time()
+        })
+
+        # Limitiere auf max_items
+        self.recent_files = self.recent_files[:self.max_items]
+
+        self.save_recent_files()
+
+    def get_recent_files(self):
+        """Gibt die Liste der zuletzt geöffneten Dateien zurück"""
+        return self.recent_files
+
+    def clear_recent_files(self):
+        """Löscht alle Recent Files"""
+        self.recent_files = []
+        self.save_recent_files()
+
+
 class VideoConverter:
     """Automatische Video-Konvertierung für Chromecast-Kompatibilität"""
 
@@ -2348,6 +2412,26 @@ class VideoPlayer(Gtk.Box):
         )
         print(f"Lokales Seeking zu {position_seconds:.1f}s (präzise)")
 
+    def step_frame(self, forward=True):
+        """Springt ein Frame vor oder zurück (Frame-by-Frame Navigation)"""
+        # Annahme: 25 FPS (PAL Standard) = 0.04 Sekunden pro Frame
+        # Für präzisere Ergebnisse könnte man die FPS aus dem Stream auslesen
+        frame_duration = 0.04  # 40ms = 1 Frame bei 25 FPS
+
+        current_pos = self.get_position()
+        if current_pos is None:
+            return
+
+        # Berechne neue Position
+        if forward:
+            new_pos = current_pos + frame_duration
+        else:
+            new_pos = max(0, current_pos - frame_duration)
+
+        # Seek zur neuen Position
+        self.seek(new_pos)
+        print(f"Frame-Step ({'vorwärts' if forward else 'rückwärts'}): {new_pos:.3f}s")
+
     def set_volume(self, volume):
         """Setzt die Lautstärke (0.0 bis 1.0)"""
         if 0.0 <= volume <= 1.0:
@@ -2490,6 +2574,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Bookmark Manager
         self.bookmark_manager = BookmarkManager()
+
+        # Recent Files Manager
+        self.recent_files_manager = RecentFilesManager(max_items=10)
 
         # Chromecast Manager, HTTP-Server und Video-Converter
         self.cast_manager = ChromecastManager()
@@ -2841,6 +2928,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         open_button.connect("clicked", self.on_open_file)
         header.pack_start(open_button)
 
+        # Recent Files Button
+        self.recent_files_button = Gtk.MenuButton()
+        self.recent_files_button.set_icon_name("document-open-recent-symbolic")
+        self.recent_files_button.set_tooltip_text("Zuletzt geöffnete Videos")
+        self.recent_files_popover = Gtk.PopoverMenu()
+        self.recent_files_button.set_popover(self.recent_files_popover)
+        self.update_recent_files_menu()
+        header.pack_start(self.recent_files_button)
+
         # URL öffnen Button (Netzwerk-Symbol)
         self.url_button = Gtk.Button()
         self.url_button.set_icon_name("network-wired-symbolic")
@@ -2953,6 +3049,61 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         header.pack_end(self.loading_spinner)
 
         self.main_box.append(header)
+
+    def update_recent_files_menu(self):
+        """Aktualisiert das Recent Files Menü"""
+        recent_files = self.recent_files_manager.get_recent_files()
+
+        menu = Gio.Menu()
+
+        if not recent_files:
+            # Zeige "Keine zuletzt geöffneten Dateien"
+            menu.append("Keine zuletzt geöffneten Dateien", None)
+        else:
+            # Füge alle Recent Files hinzu
+            for i, item in enumerate(recent_files):
+                filename = item['filename']
+                path = item['path']
+
+                # Kürze lange Dateinamen
+                if len(filename) > 40:
+                    filename = filename[:37] + "..."
+
+                # Erstelle Action für dieses File
+                action_name = f"win.open_recent_{i}"
+                menu.append(filename, action_name)
+
+                # Erstelle Action
+                action = Gio.SimpleAction.new(f"open_recent_{i}", None)
+                action.connect("activate", lambda _a, _p, path=path: self.on_open_recent_file(path))
+                self.add_action(action)
+
+            # Separator
+            menu.append_section(None, Gio.Menu())
+
+            # "Verlauf löschen" Option
+            clear_action = Gio.SimpleAction.new("clear_recent_files", None)
+            clear_action.connect("activate", self.on_clear_recent_files)
+            self.add_action(clear_action)
+            menu.append("Verlauf löschen", "win.clear_recent_files")
+
+        self.recent_files_popover.set_menu_model(menu)
+
+    def on_open_recent_file(self, filepath):
+        """Öffnet eine Datei aus den Recent Files"""
+        if Path(filepath).exists():
+            self.load_video(filepath)
+        else:
+            self.status_label.set_text("Datei existiert nicht mehr")
+            # Entferne nicht existierende Datei aus Recent Files
+            self.recent_files_manager.load_recent_files()
+            self.update_recent_files_menu()
+
+    def on_clear_recent_files(self, _action, _param):
+        """Löscht alle Recent Files"""
+        self.recent_files_manager.clear_recent_files()
+        self.update_recent_files_menu()
+        self.status_label.set_text("Verlauf gelöscht")
 
     def setup_sidebar(self):
         """Erstellt die Seitenleiste für Playlist und Chromecast"""
@@ -4446,6 +4597,102 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         except (ValueError, AttributeError):
             return None
 
+    def show_shortcuts_dialog(self):
+        """Zeigt Dialog mit allen verfügbaren Tastaturkürzeln"""
+        # Erstelle eine ScrolledWindow für den Dialog-Inhalt
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(400)
+        scrolled.set_min_content_width(500)
+
+        # Haupt-Box für den Inhalt
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content_box.set_margin_top(12)
+        content_box.set_margin_bottom(12)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+
+        # Shortcuts nach Kategorien gruppiert
+        shortcuts_data = [
+            ("Wiedergabe", [
+                ("Leertaste", "Wiedergabe/Pause"),
+                ("←/→", "5 Sekunden zurück/vor"),
+                (", / .", "Frame rückwärts/vorwärts (Frame-by-Frame)"),
+                ("[ / ]", "Geschwindigkeit verringern/erhöhen"),
+                ("N", "Nächstes Video"),
+                ("P", "Vorheriges Video"),
+            ]),
+            ("Lautstärke & Audio", [
+                ("↑/↓", "Lautstärke erhöhen/verringern (5%)"),
+                ("M", "Stumm schalten/aufheben"),
+            ]),
+            ("Ansicht", [
+                ("F11 oder F", "Vollbild ein/aus"),
+                ("I", "Info-Overlay ein/aus"),
+            ]),
+            ("A-B Loop & Export", [
+                ("A", "Loop-Punkt A setzen"),
+                ("B", "Loop-Punkt B setzen"),
+                ("C", "Loop löschen"),
+                ("E", "Clip exportieren (A-B)"),
+            ]),
+            ("Navigation", [
+                ("G", "Zu Zeit springen"),
+                ("S", "Screenshot erstellen (nur lokal)"),
+            ]),
+            ("Hilfe", [
+                ("H", "Diese Hilfe anzeigen"),
+            ]),
+        ]
+
+        # Erstelle eine Box für jede Kategorie
+        for category, shortcuts in shortcuts_data:
+            # Kategorie-Überschrift
+            category_label = Gtk.Label()
+            category_label.set_markup(f"<b>{category}</b>")
+            category_label.set_xalign(0)
+            category_label.set_margin_top(8)
+            content_box.append(category_label)
+
+            # Grid für die Shortcuts dieser Kategorie
+            grid = Gtk.Grid()
+            grid.set_column_spacing(24)
+            grid.set_row_spacing(8)
+            grid.set_margin_start(12)
+
+            for i, (key, description) in enumerate(shortcuts):
+                # Tastenkombination (fett)
+                key_label = Gtk.Label()
+                key_label.set_markup(f"<tt><b>{key}</b></tt>")
+                key_label.set_xalign(0)
+                key_label.set_halign(Gtk.Align.START)
+                grid.attach(key_label, 0, i, 1, 1)
+
+                # Beschreibung
+                desc_label = Gtk.Label(label=description)
+                desc_label.set_xalign(0)
+                desc_label.set_halign(Gtk.Align.START)
+                desc_label.set_wrap(True)
+                desc_label.set_max_width_chars(50)
+                grid.attach(desc_label, 1, i, 1, 1)
+
+            content_box.append(grid)
+
+        # Scrolled Window mit Inhalt füllen
+        scrolled.set_child(content_box)
+
+        # Dialog erstellen
+        dialog = Adw.AlertDialog.new(
+            "Tastaturkürzel",
+            None
+        )
+        dialog.set_extra_child(scrolled)
+        dialog.add_response("close", "Schließen")
+        dialog.set_response_appearance("close", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("close")
+
+        dialog.present(self)
+
     def on_toggle_pip(self, _button):
         """Schaltet den Picture-in-Picture-Modus um."""
         if self.pip_window:
@@ -4697,6 +4944,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
                 # Speichere Verzeichnis in Config
                 self.config.set_setting("last_directory", str(Path(filepath).parent))
+
+                # Füge zu Recent Files hinzu
+                self.recent_files_manager.add_recent_file(filepath)
+                self.update_recent_files_menu()
 
                 # Füge zur Playlist hinzu und setze als aktuell
                 if self.playlist_manager.add_video(filepath):
@@ -5570,6 +5821,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if not is_url:
             self.current_video_path = filepath
             filename = Path(filepath).name
+            # Füge zu Recent Files hinzu (nur lokale Dateien, keine URLs)
+            self.recent_files_manager.add_recent_file(filepath)
+            self.update_recent_files_menu()
         else:
             # Speichere die Original-URL als "Pfad" für Lesezeichen und andere Funktionen
             self.current_video_path = filepath # Für YouTube-Streams ist dies die Stream-URL
@@ -5786,7 +6040,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             "e": Gdk.KEY_e,
             "E": Gdk.KEY_E,
             "g": Gdk.KEY_g,
-            "G": Gdk.KEY_G
+            "G": Gdk.KEY_G,
+            "h": Gdk.KEY_h,
+            "H": Gdk.KEY_H,
+            "i": Gdk.KEY_i,
+            "I": Gdk.KEY_I,
+            "bracketleft": Gdk.KEY_bracketleft,
+            "bracketright": Gdk.KEY_bracketright,
+            "comma": Gdk.KEY_comma,
+            "period": Gdk.KEY_period
         }
 
         # Prüfe alle Shortcuts
@@ -5842,6 +6104,21 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             return True
         elif keyval == key_map.get(shortcuts.get("toggle_info", "i"), Gdk.KEY_i) or keyval == key_map.get(shortcuts.get("toggle_info", "i").upper(), Gdk.KEY_I):
             self.toggle_persistent_info_overlay()
+            return True
+        elif keyval == key_map.get(shortcuts.get("show_shortcuts", "h"), Gdk.KEY_h) or keyval == key_map.get(shortcuts.get("show_shortcuts", "h").upper(), Gdk.KEY_H):
+            self.show_shortcuts_dialog()
+            return True
+        elif keyval == Gdk.KEY_bracketleft:  # [ = Langsamer
+            self.decrease_playback_speed()
+            return True
+        elif keyval == Gdk.KEY_bracketright:  # ] = Schneller
+            self.increase_playback_speed()
+            return True
+        elif keyval == Gdk.KEY_comma:  # , = Frame rückwärts
+            self.step_frame_backward()
+            return True
+        elif keyval == Gdk.KEY_period:  # . = Frame vorwärts
+            self.step_frame_forward()
             return True
         return False
 
@@ -6144,6 +6421,92 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         else:
             self.status_label.set_text("Geschwindigkeitsänderung nur für lokale Wiedergabe")
 
+    def increase_playback_speed(self):
+        """Erhöht die Wiedergabegeschwindigkeit um eine Stufe"""
+        if self.play_mode != "local":
+            self.status_label.set_text("Geschwindigkeitsänderung nur für lokale Wiedergabe")
+            return
+
+        # Verfügbare Geschwindigkeiten
+        speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+
+        current_speed = self.current_playback_rate
+
+        # Finde nächst höhere Geschwindigkeit
+        next_speed = None
+        for speed in speeds:
+            if speed > current_speed:
+                next_speed = speed
+                break
+
+        if next_speed is None:
+            # Bereits bei maximaler Geschwindigkeit
+            self.status_label.set_text(f"Geschwindigkeit: {current_speed}x (Maximum)")
+            return
+
+        self.current_playback_rate = next_speed
+        self.video_player.set_playback_rate(next_speed)
+        self.video_player._playback_rate = next_speed
+        self.status_label.set_text(f"Geschwindigkeit: {next_speed}x")
+
+    def decrease_playback_speed(self):
+        """Verringert die Wiedergabegeschwindigkeit um eine Stufe"""
+        if self.play_mode != "local":
+            self.status_label.set_text("Geschwindigkeitsänderung nur für lokale Wiedergabe")
+            return
+
+        # Verfügbare Geschwindigkeiten
+        speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+
+        current_speed = self.current_playback_rate
+
+        # Finde nächst niedrigere Geschwindigkeit
+        prev_speed = None
+        for speed in reversed(speeds):
+            if speed < current_speed:
+                prev_speed = speed
+                break
+
+        if prev_speed is None:
+            # Bereits bei minimaler Geschwindigkeit
+            self.status_label.set_text(f"Geschwindigkeit: {current_speed}x (Minimum)")
+            return
+
+        self.current_playback_rate = prev_speed
+        self.video_player.set_playback_rate(prev_speed)
+        self.video_player._playback_rate = prev_speed
+        self.status_label.set_text(f"Geschwindigkeit: {prev_speed}x")
+
+    def step_frame_forward(self):
+        """Springt ein Frame vorwärts"""
+        if self.play_mode != "local":
+            self.status_label.set_text("Frame-Stepping nur für lokale Wiedergabe")
+            return
+
+        # Pausiere Video für Frame-by-Frame Analyse
+        state = self.video_player.playbin.get_state(0)
+        if state[1] == Gst.State.PLAYING:
+            self.video_player.pause()
+            self.play_button.set_icon_name("media-playback-start-symbolic")
+
+        self.video_player.step_frame(forward=True)
+        self.status_label.set_text("Frame vorwärts")
+
+    def step_frame_backward(self):
+        """Springt ein Frame rückwärts"""
+        if self.play_mode != "local":
+            self.status_label.set_text("Frame-Stepping nur für lokale Wiedergabe")
+            return
+
+        # Pausiere Video für Frame-by-Frame Analyse
+        state = self.video_player.playbin.get_state(0)
+        if state[1] == Gst.State.PLAYING:
+            self.video_player.pause()
+            self.play_button.set_icon_name("media-playback-start-symbolic")
+
+        self.video_player.step_frame(forward=False)
+        self.status_label.set_text("Frame rückwärts")
+
     def on_show_about(self, button):
         """Zeigt About-Dialog"""
         about = Adw.AboutWindow(
@@ -6151,7 +6514,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="1.9.0",
+            version="2.0.0",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
@@ -6162,7 +6525,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Füge Version-Informationen als Credit-Sections hinzu
         about.add_credit_section(
-            "Was ist neu in Version 1.9.0?",
+            "Was ist neu in Version 2.0.0?",
+            [
+                "Recent Files - Zuletzt geöffnete Videos (Verlauf)",
+                "Playback Speed Shortcuts - [ / ] für Geschwindigkeitsänderung",
+                "Frame-by-Frame Navigation - , / . für präzise Video-Analyse",
+                "Shortcuts Help Dialog - H-Taste für Tastaturkürzel-Übersicht"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 1.9.0",
             [
                 "Spulen (Seeking) für YouTube-Videos aktiviert",
                 "Stabilitätsverbesserungen für die Timeline",

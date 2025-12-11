@@ -37,6 +37,7 @@
 - **YouTube Video Streaming** - Direkte Wiedergabe von YouTube-Videos über URL-Eingabe
 - **Playlist-Unterstützung** - Mehrere Videos in Warteschlange mit Auto-Advance
 - **Playlist-Thumbnails** - Automatische Video-Vorschaubilder in der Playlist
+- **Recent Files** - Verlauf der zuletzt geöffneten Videos (max. 10)
 - **Vollbild-Modus** - F11 für Vollbild-Wiedergabe
 - **Drag & Drop** - Videos direkt ins Fenster ziehen
 - **Timeline/Seek-Funktion** mit Echtzeit-Positionsanzeige
@@ -47,14 +48,15 @@
 - **Untertitel-Support** - Automatische Erkennung von SRT, ASS, VTT Dateien
 - **Audio-Track-Auswahl** - Wechsel zwischen mehreren Audio-Spuren
 - **Lesezeichen/Resume** - Automatisches Speichern und Fortsetzen der Wiedergabe
-- **Wiedergabegeschwindigkeit** - 0.5x bis 2.0x mit Dropdown-Menü
+- **Wiedergabegeschwindigkeit** - 0.25x bis 3.0x mit Dropdown-Menü und Tastaturkürzeln
+- **Frame-by-Frame Navigation** - Präzise Einzelbild-Navigation mit , und . Tasten
 - **Screenshot-Funktion** - Frame-Capture mit S-Taste
 - **Video-Equalizer** - Helligkeit, Kontrast, Sättigung und Farbton anpassen
 - **A-B Loop** - Wiederholungsschleife zwischen zwei Punkten für Lern-Videos
 - **Go-To-Zeit** - Sprung zu bestimmter Zeitposition (MM:SS oder HH:MM:SS)
 - **Kapitel-Erkennung** - Automatische Erkennung und Navigation von MKV/MP4 Kapiteln
 - **Timeline-Thumbnails** - Vorschau-Bilder beim Hovern über Timeline
-- **Tastatur-Shortcuts** - Steuerung per Leertaste, Pfeiltasten, etc.
+- **Tastatur-Shortcuts** - Umfangreiche Tastatursteuerung mit Hilfe-Dialog (H-Taste)
 - **Abspiellisten-Import** - M3U und PLS Format-Support
 - **Intuitive Steuerung**: Previous, Next, Play, Pause, Stop, Seek, Volume
 
@@ -253,21 +255,36 @@ Oder suche nach "Video Chromecast Player" in deinen GNOME-Anwendungen.
 
 ### Tastatur-Shortcuts
 
+**Drücke H für eine vollständige Übersicht aller Tastenkürzel im Player!**
+
+#### Wiedergabe
 - **Leertaste**: Wiedergabe / Pause
-- **Pfeil nach rechts**: 5 Sekunden vorspulen
-- **Pfeil nach links**: 5 Sekunden zurückspulen
-- **Pfeil nach oben**: Lautstärke erhöhen
-- **Pfeil nach unten**: Lautstärke verringern
-- **M**: Stummschalten / Ton an
-- **F**: Vollbildmodus umschalten
-- **F11**: Vollbildmodus umschalten
-- **S**: Screenshot vom aktuellen Frame
-- **A**: A-B Loop Startpunkt (A) setzen
-- **B**: A-B Loop Endpunkt (B) setzen
-- **C**: A-B Loop löschen (Clear)
-- **G**: Go-To-Zeit Dialog öffnen
+- **←/→**: 5 Sekunden zurück/vor
+- **,/.**: Frame rückwärts/vorwärts (Frame-by-Frame)
+- **[/]**: Geschwindigkeit verringern/erhöhen
 - **N**: Nächstes Video in Playlist
 - **P**: Vorheriges Video in Playlist
+
+#### Lautstärke & Audio
+- **↑/↓**: Lautstärke erhöhen/verringern (5%)
+- **M**: Stummschalten / Ton an
+
+#### Ansicht
+- **F11 oder F**: Vollbildmodus umschalten
+- **I**: Info-Overlay ein/aus
+
+#### A-B Loop & Export
+- **A**: Loop-Punkt A setzen
+- **B**: Loop-Punkt B setzen
+- **C**: Loop löschen
+- **E**: Clip exportieren (A-B)
+
+#### Navigation
+- **G**: Zu Zeit springen
+- **S**: Screenshot erstellen (nur lokal)
+
+#### Hilfe
+- **H**: Tastaturkürzel-Übersicht anzeigen
 
 ### Untertitel verwenden
 
@@ -775,7 +792,8 @@ Wenn du einen Bug findest:
 
 ### 🎯 Benutzerfreundlichkeit
 - [ ] **Kontextmenü** - Rechtsklick-Menü mit häufigen Aktionen
-- [ ] **Tastatur-Shortcuts-Hilfe** - Visuelle Übersicht aller Shortcuts (H-Taste)
+- [x] **Tastatur-Shortcuts-Hilfe** - Visuelle Übersicht aller Shortcuts (H-Taste) ✓
+- [x] **Recent Files** - Verlauf der zuletzt geöffneten Videos ✓
 - [ ] **Schnell-Einstellungen-Panel** - Dashboard mit häufig genutzten Einstellungen
 - [ ] **Fenster-Position speichern** - Automatisches Merken der Fensterposition
 - [ ] **Gesten-Steuerung** - Touch-Gesten für Tablets und Touchscreens
@@ -784,7 +802,7 @@ Wenn du einen Bug findest:
 ### ⚡ Power-User Features
 - [ ] **Segment-Export** - Video-Segmente von A nach B exportieren
 - [ ] **Batch-Konvertierung** - Mehrere Videos gleichzeitig konvertieren
-- [ ] **Frame-Stepping** - Einzelne Frames vor/zurück (</> Tasten)
+- [x] **Frame-Stepping** - Einzelne Frames vor/zurück (,/. Tasten) ✓
 - [ ] **Metadaten-Editor** - Bearbeitung von Video-Tags, Titel, Beschreibung
 - [ ] **Codec-Analyse** - Detaillierte Codec-Informationen und Bitrate-Graphen
 - [ ] **Markierungs-System** - Custom Marker für wichtige Zeitpunkte
@@ -822,10 +840,10 @@ Wenn du einen Bug findest:
 ### ⌨️ Zusätzliche Tastatur-Shortcuts
 - [ ] **J/L Tasten** - -10/+10 Sekunden Seek (VLC-Style)
 - [ ] **0-9 Tasten** - Sprung zu 0%-90% der Video-Länge
-- [ ] **+/- Tasten** - Wiedergabegeschwindigkeit erhöhen/verringern
+- [x] **[/] Tasten** - Wiedergabegeschwindigkeit verringern/erhöhen ✓
+- [x] **,/. Tasten** - Frame rückwärts/vorwärts ✓
 - [ ] **T Taste** - Untertitel Ein/Aus Toggle
-- [ ] **H Taste** - Shortcuts-Hilfe anzeigen
-- [ ] **[/] Tasten** - Zoom In/Out
+- [x] **H Taste** - Shortcuts-Hilfe anzeigen ✓
 - [ ] **Ctrl+O** - Datei öffnen Dialog
 - [ ] **Ctrl+U** - URL-Dialog öffnen
 - [ ] **Ctrl+Q** - Anwendung beenden
@@ -838,6 +856,27 @@ Wenn du einen Bug findest:
 - [ ] **Metadaten-Export** - Video-Informationen als CSV/JSON
 
 ## 📊 Version History
+
+### Version 2.0.0 (Dezember 2025)
+- ✨ **Recent Files** - Verlauf der zuletzt geöffneten Videos (max. 10 Einträge)
+- 🕐 Recent Files Button in Header-Bar mit Uhr-Symbol
+- 📋 Automatisches Tracking lokaler Video-Dateien
+- 🗑️ "Verlauf löschen" Option im Menü
+- 💾 Speicherung in `~/.config/video-chromecast-player/recent_files.json`
+- ✨ **Playback Speed Shortcuts** - Tastaturkürzel für Geschwindigkeitsänderung
+- ⌨️ **[** Taste: Geschwindigkeit verringern (0.25x bis 3.0x)
+- ⌨️ **]** Taste: Geschwindigkeit erhöhen (0.25x bis 3.0x)
+- 🎯 10 Geschwindigkeitsstufen mit Status-Feedback
+- ✨ **Frame-by-Frame Navigation** - Präzise Einzelbild-Navigation
+- ⌨️ **,** Taste: Frame rückwärts (25 FPS / 0.04s)
+- ⌨️ **.** Taste: Frame vorwärts (25 FPS / 0.04s)
+- 🎬 Automatisches Pausieren für Frame-Analyse
+- 🎯 Perfekt für Screenshots und Video-Analyse
+- ✨ **Shortcuts Help Dialog** - Tastaturkürzel-Übersicht
+- ⌨️ **H** Taste: Shortcuts-Dialog anzeigen
+- 📖 Übersichtlich in 6 Kategorien organisiert (Wiedergabe, Lautstärke, Ansicht, A-B Loop, Navigation, Hilfe)
+- 📜 Scrollbare Liste aller Tastenkombinationen
+- 🎨 Professionelles Design mit Monospace-Schrift für Tastennamen
 
 ### Version 1.3.0 (Dezember 2025)
 - ✨ **Playlist-Thumbnails** - Automatische Video-Vorschaubilder in der Playlist
