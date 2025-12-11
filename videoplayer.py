@@ -1580,6 +1580,7 @@ class VideoPlayer(Gtk.Box):
         self.streams_ready_callback = None
         self.toc_ready_callback = None
         self.eos_callback = None
+        self.seek_done_callback = None
         self.info_callback = None
         # Zustand für Video-Infos, um Flackern zu vermeiden
         self._video_info = {
@@ -2234,7 +2235,10 @@ class VideoPlayer(Gtk.Box):
         elif t == Gst.MessageType.ASYNC_DONE:
             # Ein guter Zeitpunkt, um nach Untertiteln zu suchen, da die Streams jetzt bekannt sind
             if hasattr(self, 'streams_ready_callback') and self.streams_ready_callback:
-                GLib.idle_add(self.streams_ready_callback)
+                GLib.idle_add(self.streams_ready_callback) 
+            # Wenn ein Seek-Vorgang abgeschlossen ist, können wir das Seeking-Flag zurücksetzen.
+            if hasattr(self, 'seek_done_callback') and self.seek_done_callback:
+                GLib.idle_add(self.seek_done_callback)
 
     def get_position(self):
         """Gibt aktuelle Position in Sekunden zurück"""
@@ -2496,10 +2500,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         # Timeline state tracking
         self.timeline_update_timeout = None
         self.is_seeking = False
+        self.is_seeking_active = False # NEU: Flag für aktiven GStreamer Seek
+        self._is_dragging = False
         self.timeline_seek_handler_id = None
         self.info_overlay_timeout_id = None
         self.info_overlay_shown_for_current_video = False
         self.thumbnail_hover_timeout_id = None
+        self._popover_autohide_timer = None
+        self._scrubbing_timeout_id = None # NEU: Für Live-Scrubbing
+        self._scrubbing_update_timer = None # NEU: Timer für kontinuierliches Polling während Drag
+        self._live_scrub_timeout = None # NEU: Timer für vereinfachtes Live-Scrubbing
 
         # Initialisiere Lautstärke
         saved_volume = self.config.get_setting("volume", 1.0)
@@ -2521,6 +2531,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.video_player.info_callback = self.show_video_info
 
         # Setze Callback für Stream-Erkennung (für Untertitel und Audio)
+        self.video_player.seek_done_callback = self.on_seek_done
         self.video_player.streams_ready_callback = self.update_media_menus
 
         # Setze Callback für Kapitel-Erkennung
@@ -3038,16 +3049,15 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.timeline_scale.set_draw_value(False)
         self.timeline_scale.set_sensitive(False)  # Deaktiviert bis Video geladen
 
-        # Handler für das Klicken auf die Leiste (ohne Ziehen)
-        self.timeline_seek_handler_id = self.timeline_scale.connect("value-changed", self.on_timeline_seek)
+        # VEREINFACHTER ANSATZ: Nutze value-changed für Live-Scrubbing
+        # value-changed wird bei JEDEM Wert-Update gefeuert, auch während Drag
+        self.timeline_seek_handler_id = self.timeline_scale.connect("value-changed", self.on_timeline_value_changed_live)
 
-        # Verwende GestureDrag, um den Start und das Ende des Ziehens zuverlässig zu erkennen
-        drag_gesture = Gtk.GestureDrag.new()
-        drag_gesture.set_button(1)  # Nur auf linke Maustaste reagieren
-        drag_gesture.connect("drag-begin", self.on_timeline_drag_begin)
-        drag_gesture.connect("drag-end", self.on_timeline_drag_end)
-        self.timeline_scale.add_controller(drag_gesture)
-
+        # Verwende GestureClick NUR um zu erkennen, wann ein einfacher Klick (kein Drag) war
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.set_button(1)
+        click_gesture.connect("released", self.on_timeline_click)
+        self.timeline_scale.add_controller(click_gesture)
 
         # Variablen für Thumbnail-Caching
         self.thumbnail_cache = {}
@@ -3127,7 +3137,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def update_timeline(self):
         """Wird alle 250ms aufgerufen - aktualisiert Timeline"""
-        if self.is_seeking:
+        if self.is_seeking or self.is_seeking_active:
             return True  # Nicht während Drag updaten
 
         position = self.get_current_position()
@@ -3224,41 +3234,67 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if position and duration and position > 0:
             self.bookmark_manager.set_bookmark(self.current_video_path, position, duration)
 
-    def on_timeline_drag_begin(self, gesture, start_x, start_y):
-        """Wird aufgerufen, wenn der Benutzer beginnt, den Slider zu ziehen."""
-        self.is_seeking = True
-        if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
-            self.timeline_scale.handler_block(self.timeline_seek_handler_id)
-        print("Timeline seeking started")
+    def on_timeline_value_changed_live(self, scale):
+        """Wird bei JEDER Wertänderung aufgerufen - ermöglicht Live-Scrubbing"""
+        duration = self.get_current_duration()
+        if not duration or duration <= 0:
+            return
+
+        value = scale.get_value()
+        position_seconds = (value / 100.0) * duration
+
+        # Aktualisiere Zeit-Label sofort
+        self.time_label.set_text(self.format_time(position_seconds))
+
+        # Entferne alten Seek-Timer (Debouncing mit 50ms)
+        if hasattr(self, '_live_scrub_timeout') and self._live_scrub_timeout:
+            GLib.source_remove(self._live_scrub_timeout)
+
+        # Führe Seek mit kleinem Delay aus (Debouncing)
+        self._live_scrub_timeout = GLib.timeout_add(50, self._do_live_scrub_seek, position_seconds)
+
+    def _do_live_scrub_seek(self, position_seconds):
+        """Führt den Seek für Live-Scrubbing aus"""
+        self.perform_seek(position_seconds)
+        self._live_scrub_timeout = None
+        return False  # Timer nicht wiederholen
 
     def on_timeline_drag_end(self, gesture, offset_x, offset_y):
         """Wird aufgerufen, wenn der Benutzer das Ziehen des Sliders beendet."""
-        # Führe den finalen Seek-Vorgang an der Endposition aus
-        self.on_timeline_seek(self.timeline_scale)
+        # Stoppe den Live-Scrubbing Timer
+        if self._scrubbing_update_timer:
+            GLib.source_remove(self._scrubbing_update_timer)
+            self._scrubbing_update_timer = None
+
+        # Beende den Scrubbing-Timeout, da der finale Seek-Befehl jetzt kommt.
+        if self._scrubbing_timeout_id:
+            GLib.source_remove(self._scrubbing_timeout_id)
+            self._scrubbing_timeout_id = None
+
+        self._is_dragging = False
+        duration = self.get_current_duration()
+        if duration > 0:
+            value = self.timeline_scale.get_value()
+            position_seconds = (value / 100.0) * duration
+            print(f"Timeline drag ended, seeking to: {self.format_time(position_seconds)}")
+            self.perform_seek(position_seconds)
+            self.time_label.set_text(self.format_time(position_seconds))
+        
+        # Wichtig: Setze is_seeking erst hier auf False, NACHDEM der letzte perform_seek
+        # aufgerufen wurde. Das is_seeking_active Flag übernimmt ab jetzt.
         self.is_seeking = False
-        print("Timeline seeking ended")
-        if self.timeline_seek_handler_id and self.timeline_scale.handler_is_connected(self.timeline_seek_handler_id):
-            self.timeline_scale.handler_unblock(self.timeline_seek_handler_id)
-        # Setze die Position zurück, um ein sofortiges Thumbnail-Update beim nächsten Hover zu erzwingen
-        self.last_thumbnail_position = None
-        # Verstecke das Popover, falls es noch offen ist
         self.thumbnail_popover.popdown()
 
-    def on_timeline_seek(self, scale):
-        """Wird aufgerufen, wenn der Benutzer den Timeline-Slider bewegt oder klickt."""
-        duration = self.get_current_duration()
+    def on_seek_done(self):
+        """Wird aufgerufen, wenn GStreamer einen Seek-Vorgang abgeschlossen hat."""
+        self.is_seeking_active = False
+        return False # Nur einmal ausführen
 
-        # Führe Seek nur aus, wenn der Benutzer aktiv sucht (zieht) oder klickt.
-        # Dies verhindert, dass die programmgesteuerte Aktualisierung in update_timeline()
-        # einen Seek-Vorgang auslöst.
-        if duration > 0 and self.is_seeking:
-            value = scale.get_value()
-            position_seconds = (value / 100.0) * duration
-            self.perform_seek(position_seconds)
-            # Aktualisiere das linke Zeit-Label sofort
-            self.time_label.set_text(self.format_time(position_seconds))
-        return False  # Erlaube dem Signal, weiter zu laufen
-
+    def on_timeline_click(self, gesture, n_press, x, y):
+        """Wird aufgerufen, wenn der Benutzer auf die Timeline klickt."""
+        # Diese Funktion wird durch value-changed bereits behandelt,
+        # aber wir lassen sie hier für Kompatibilität
+        pass
 
     def on_timeline_enter(self, controller, _x, _y):
         """Wird aufgerufen, wenn die Maus die Timeline betritt."""
@@ -3469,6 +3505,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         """Führt Seek basierend auf Modus aus"""
         print(f"Seeking to {position_seconds:.1f}s (mode: {self.play_mode})")
+        # Setze das Flag, um UI-Updates während des asynchronen Seeks zu blockieren
+        self.is_seeking_active = True
+
         if self.play_mode == "local":
             self.video_player.seek(position_seconds)
 
@@ -3476,13 +3515,17 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Chromecast-Seeking in Thread ausführen um UI nicht zu blockieren
             if self.cast_manager.mc:
                 def chromecast_seek():
-
+                    # Für Chromecast setzen wir das Flag nach einer kurzen Verzögerung zurück,
+                    # da wir keine direkte "seek done" Nachricht haben.
+                    GLib.timeout_add(1000, lambda: setattr(self, 'is_seeking_active', False) or False)
                     self.cast_manager.seek(position_seconds)
 
                 thread = threading.Thread(target=chromecast_seek, daemon=True)
                 thread.start()
             else:
                 print("Cannot seek: No Chromecast connection")
+        
+        return False # Wichtig für GLib.timeout_add, damit es nur einmal ausgeführt wird
 
     def setup_performance_optimizations(self):
         """Setzt Performance-Optimierungen"""
@@ -3581,6 +3624,22 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.ab_button_clear.connect("clicked", self.on_clear_loop)
         self.ab_button_clear.set_sensitive(False)
         self.control_box.append(self.ab_button_clear)
+
+        # Export A-B Clip Button
+        self.export_clip_button = Gtk.Button()
+        self.export_clip_button.set_icon_name("document-save-symbolic")
+        self.export_clip_button.set_tooltip_text("A-B Bereich als Video exportieren (Taste 'E')")
+        self.export_clip_button.connect("clicked", lambda _: self.export_ab_clip())
+        self.export_clip_button.set_sensitive(False)
+        self.control_box.append(self.export_clip_button)
+
+        # Screenshot Button
+        self.screenshot_button = Gtk.Button()
+        self.screenshot_button.set_icon_name("camera-photo-symbolic")
+        self.screenshot_button.set_tooltip_text("Screenshot vom aktuellen Frame (Taste 'S')")
+        self.screenshot_button.connect("clicked", lambda _: self.take_screenshot())
+        self.screenshot_button.set_sensitive(False)
+        self.control_box.append(self.screenshot_button)
 
         # Go-To Button (Sprung zu bestimmter Zeit)
         self.goto_button = Gtk.Button()
@@ -4034,10 +4093,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Aktiviere Clear-Button
             self.ab_button_clear.set_sensitive(True)
 
-            # Wenn B bereits gesetzt ist, aktiviere Loop
+            # Wenn B bereits gesetzt ist, aktiviere Loop und Export-Button
             if self.ab_loop_b is not None and self.ab_loop_a < self.ab_loop_b:
                 self.ab_loop_enabled = True
                 self.ab_button_b.add_css_class("suggested-action")
+                self.export_clip_button.set_sensitive(True)  # Aktiviere Export-Button
                 self.status_label.set_text(f"Loop aktiv: {self.format_time(self.ab_loop_a)} - {self.format_time(self.ab_loop_b)}")
 
     def on_set_loop_b(self, _button):
@@ -4057,10 +4117,11 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             # Aktiviere Clear-Button
             self.ab_button_clear.set_sensitive(True)
 
-            # Wenn A bereits gesetzt ist, aktiviere Loop
+            # Wenn A bereits gesetzt ist, aktiviere Loop und Export-Button
             if self.ab_loop_a is not None and self.ab_loop_a < self.ab_loop_b:
                 self.ab_loop_enabled = True
                 self.ab_button_a.add_css_class("suggested-action")
+                self.export_clip_button.set_sensitive(True)  # Aktiviere Export-Button
                 self.status_label.set_text(f"Loop aktiv: {self.format_time(self.ab_loop_a)} - {self.format_time(self.ab_loop_b)}")
 
     def on_clear_loop(self, _button):
@@ -4071,6 +4132,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.ab_button_a.remove_css_class("suggested-action")
         self.ab_button_b.remove_css_class("suggested-action")
         self.ab_button_clear.set_sensitive(False)
+        self.export_clip_button.set_sensitive(False)  # Deaktiviere Export-Button
         self.status_label.set_text("A-B Loop gelöscht")
         print("A-B Loop: Loop gelöscht")
 
@@ -4082,6 +4144,98 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 # Springe zurück zu Punkt A
                 self.seek_to_position(self.ab_loop_a)
                 print(f"A-B Loop: Zurück zu Punkt A ({self.ab_loop_a:.1f}s)")
+
+    def export_ab_clip(self):
+        """Exportiert den A-B Bereich als separates Video"""
+        if self.ab_loop_a is None or self.ab_loop_b is None:
+            self.status_label.set_text("Bitte setze erst A und B Punkte")
+            return
+
+        if not self.current_video_path:
+            self.status_label.set_text("Kein Video geladen")
+            return
+
+        # Erstelle Clips-Verzeichnis (nutze XDG für lokalisierte Ordnernamen)
+        import subprocess
+        try:
+            videos_dir = subprocess.check_output(['xdg-user-dir', 'VIDEOS'], text=True).strip()
+            clips_dir = Path(videos_dir) / "Video-Clips"
+        except:
+            # Fallback falls xdg-user-dir nicht verfügbar
+            clips_dir = Path.home() / "Videos" / "Video-Clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generiere Dateinamen
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        video_name = Path(self.current_video_path).stem
+        duration = self.ab_loop_b - self.ab_loop_a
+
+        filename = f"{video_name}_clip_{self.format_time(self.ab_loop_a).replace(':', '-')}_{timestamp}.mp4"
+        output_path = clips_dir / filename
+
+        self.status_label.set_text("Exportiere Clip...")
+
+        # Exportiere in Thread, um UI nicht zu blockieren
+        def export_clip():
+            import subprocess
+            try:
+                # ffmpeg Befehl zum Extrahieren des Clips
+                cmd = [
+                    'ffmpeg',
+                    '-i', self.current_video_path,
+                    '-ss', str(self.ab_loop_a),
+                    '-t', str(duration),
+                    '-c', 'copy',  # Stream kopieren ohne Re-Encoding (schnell)
+                    '-avoid_negative_ts', 'make_zero',
+                    str(output_path),
+                    '-y'  # Überschreibe existierende Datei
+                ]
+
+                print(f"Exportiere Clip: {self.format_time(self.ab_loop_a)} - {self.format_time(self.ab_loop_b)}")
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                if result.returncode == 0:
+                    # Erfolg
+                    GLib.idle_add(self.status_label.set_text, f"Clip gespeichert: {filename}")
+                    GLib.idle_add(self._show_clip_export_success_dialog, str(output_path))
+                    print(f"Clip erfolgreich exportiert: {output_path}")
+                else:
+                    # Fehler
+                    error_msg = result.stderr if result.stderr else "Unbekannter Fehler"
+                    print(f"Fehler beim Exportieren: {error_msg}")
+                    GLib.idle_add(self.status_label.set_text, "Clip-Export fehlgeschlagen")
+
+            except FileNotFoundError:
+                GLib.idle_add(self.status_label.set_text, "ffmpeg nicht gefunden - bitte installieren")
+                print("ffmpeg ist nicht installiert")
+            except Exception as e:
+                GLib.idle_add(self.status_label.set_text, f"Export-Fehler: {str(e)}")
+                print(f"Export-Fehler: {e}")
+
+        import threading
+        thread = threading.Thread(target=export_clip, daemon=True)
+        thread.start()
+
+    def _show_clip_export_success_dialog(self, filepath):
+        """Zeigt einen Success-Dialog nach Clip-Export"""
+        dialog = Adw.AlertDialog.new(
+            "Clip erfolgreich exportiert",
+            f"Der Video-Clip wurde gespeichert:\n\n{filepath}\n\nMöchten Sie den Ordner öffnen?"
+        )
+        dialog.add_response("cancel", "Schließen")
+        dialog.add_response("open", "Ordner öffnen")
+        dialog.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("open")
+
+        def on_response(d, response):
+            if response == "open":
+                import subprocess
+                folder = str(Path(filepath).parent)
+                subprocess.Popen(['xdg-open', folder])
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     def update_chromecast_status_display(self):
         """Aktualisiert die erweiterte Chromecast-Status-Anzeige"""
@@ -5326,6 +5480,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.ab_button_a.set_sensitive(True)
             self.ab_button_b.set_sensitive(True)
             self.goto_button.set_sensitive(True)
+            self.screenshot_button.set_sensitive(True)  # Screenshot-Button aktivieren
 
             if autoplay:
                 # Play-Button aktualisieren
@@ -5501,6 +5656,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             "B": Gdk.KEY_B,
             "c": Gdk.KEY_c,
             "C": Gdk.KEY_C,
+            "e": Gdk.KEY_e,
+            "E": Gdk.KEY_E,
             "g": Gdk.KEY_g,
             "G": Gdk.KEY_G
         }
@@ -5548,6 +5705,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             if self.ab_button_clear.get_sensitive():
                 self.on_clear_loop(None)
             return True
+        elif keyval == key_map.get(shortcuts.get("export_clip", "e"), Gdk.KEY_e) or keyval == key_map.get(shortcuts.get("export_clip", "e").upper(), Gdk.KEY_E):
+            if self.export_clip_button.get_sensitive():
+                self.export_ab_clip()
+            return True
         elif keyval == key_map.get(shortcuts.get("goto_time", "g"), Gdk.KEY_g) or keyval == key_map.get(shortcuts.get("goto_time", "g").upper(), Gdk.KEY_G):
             if self.goto_button.get_sensitive():
                 self.on_show_goto_dialog(None)
@@ -5563,8 +5724,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             self.status_label.set_text("Screenshots nur bei lokaler Wiedergabe möglich")
             return
 
-        # Erstelle Screenshots-Verzeichnis
-        screenshots_dir = Path.home() / "Pictures" / "Video-Screenshots"
+        # Erstelle Screenshots-Verzeichnis (nutze XDG für lokalisierte Ordnernamen)
+        import subprocess
+        try:
+            pictures_dir = subprocess.check_output(['xdg-user-dir', 'PICTURES'], text=True).strip()
+            screenshots_dir = Path(pictures_dir) / "Video-Screenshots"
+        except:
+            # Fallback falls xdg-user-dir nicht verfügbar
+            screenshots_dir = Path.home() / "Pictures" / "Video-Screenshots"
         screenshots_dir.mkdir(parents=True, exist_ok=True)
 
         # Generiere Dateinamen mit Timestamp
