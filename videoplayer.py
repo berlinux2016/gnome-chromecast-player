@@ -1029,12 +1029,32 @@ class ChromecastManager:
             return False
 
     def pause(self):
+        """Pausiert Chromecast-Wiedergabe"""
         if self.mc:
-            self.mc.pause()
+            try:
+                print("Chromecast: Pause wird gesendet...")
+                self.mc.pause()
+                print("Chromecast: Pause-Befehl erfolgreich gesendet")
+            except Exception as e:
+                print(f"Chromecast Pause-Fehler: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("WARNUNG: Chromecast Media Controller (self.mc) ist nicht initialisiert!")
 
     def play(self):
+        """Startet/Fortsetzt Chromecast-Wiedergabe"""
         if self.mc:
-            self.mc.play()
+            try:
+                print("Chromecast: Play wird gesendet...")
+                self.mc.play()
+                print("Chromecast: Play-Befehl erfolgreich gesendet")
+            except Exception as e:
+                print(f"Chromecast Play-Fehler: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("WARNUNG: Chromecast Media Controller (self.mc) ist nicht initialisiert!")
 
     def stop(self):
         if self.mc:
@@ -1710,19 +1730,6 @@ class VideoPlayer(Gtk.Box):
             self.gtksink.set_property("sync", True)
 
         print("✓ Performance-Optimierungen aktiviert (5MB Buffer, 2s Buffering)")
-
-    def reconnect_play_button(self, new_handler):
-        """Sauberes Reconnecting des Play-Buttons ohne Memory Leaks"""
-        # Disconnect alter Handler wenn vorhanden
-        if self.play_button_handler_id is not None:
-            try:
-                self.play_button.disconnect(self.play_button_handler_id)
-            except:
-                pass  # Handler war bereits disconnected
-            self.play_button_handler_id = None
-
-        # Connect neuer Handler
-        self.play_button_handler_id = self.play_button.connect("clicked", new_handler)
 
     def setup_element(self, element, name):
         """Helper function to create and check for GStreamer elements."""
@@ -2744,9 +2751,6 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def setup_drop_css(self):
         """Fügt CSS für Drag-and-Drop visuelles Feedback hinzu"""
-        # Signal Handler IDs für Play-Button (Memory Leak Prevention)
-        self.play_button_handler_id = None
-
         css_provider = Gtk.CssProvider()
         css = b"""
         .drop-active {
@@ -3819,11 +3823,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.control_box.append(self.previous_button)
 
         # Play Button
-        self.play_button = Gtk.Button()
-        self.play_button.set_icon_name("media-playback-start-symbolic")
-        self.play_button.connect("clicked", self.on_play)
-        self.control_box.append(self.play_button)
+        self.play_stop_button = Gtk.Button()
+        self.play_stop_button.set_icon_name("media-playback-start-symbolic")
+        self.play_stop_button.set_tooltip_text("Abspielen / Stoppen")
+        self.play_stop_button_handler_id = self.play_stop_button.connect("clicked", self.on_play)
+        print(f"🔧 INITIAL Play-Button Handler connected: on_play (ID: {self.play_stop_button_handler_id})")
+        self.control_box.append(self.play_stop_button)
 
+        # Pause Button
+        self.pause_button = Gtk.Button()
+        self.pause_button.set_icon_name("media-playback-pause-symbolic")
+        self.pause_button.set_tooltip_text("Pause / Fortsetzen")
+        self.pause_button.connect("clicked", self.on_pause)
+        self.pause_button.set_sensitive(False) # Initial deaktiviert
+        self.control_box.append(self.pause_button)
         # Next Button
         self.next_button = Gtk.Button()
         self.next_button.set_icon_name("media-skip-forward-symbolic")
@@ -5130,18 +5143,20 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         else:
             self.mode_label.set_markup('<span foreground="#7CB342"><b>Lokal</b></span>')
 
-    def reconnect_play_button(self, new_handler):
+    def reconnect_play_stop_button(self, old_handler_id, new_handler):
         """Sauberes Reconnecting des Play-Buttons ohne Memory Leaks"""
         # Disconnect alter Handler wenn vorhanden
-        if self.play_button_handler_id is not None:
+        if old_handler_id is not None and self.play_stop_button.handler_is_connected(old_handler_id):
             try:
-                self.play_button.disconnect(self.play_button_handler_id)
-            except:
-                pass  # Handler war bereits disconnected
-            self.play_button_handler_id = None
+                self.play_stop_button.disconnect(old_handler_id)
+                print(f"✓ Alter Handler disconnected (ID: {old_handler_id})")
+            except TypeError:
+                print(f"⚠ Warnung: Handler-ID {old_handler_id} konnte nicht getrennt werden.")
 
         # Connect neuer Handler
-        self.play_button_handler_id = self.play_button.connect("clicked", new_handler)
+        new_id = self.play_stop_button.connect("clicked", new_handler)
+        print(f"✓ Neuer Handler connected: {new_handler.__name__} (ID: {new_id})")
+        return new_id
 
     def on_mode_changed(self, switch, gparam):
         """Wechselt zwischen lokalem und Chromecast-Modus"""
@@ -5185,8 +5200,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
             # Aktualisiere Play-Button auf "Play" da Chromecast-Streaming
             # erst mit Play-Button gestartet werden muss
-            self.reconnect_play_button(self.on_play)
-            self.play_button.set_icon_name("media-playback-start-symbolic")
+            self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_play)
+            self.play_stop_button.set_icon_name("media-playback-start-symbolic")
+            self.pause_button.set_sensitive(False)
 
             # Synchronisiere Lautstärke zum Chromecast
             if self.cast_manager.selected_cast:
@@ -5244,8 +5260,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
                 # Aktualisiere Play-Button auf "Play" (nicht "Pause")
                 # da das Video gestoppt/pausiert ist
-                self.reconnect_play_button(self.on_play)
-                self.play_button.set_icon_name("media-playback-start-symbolic")
+                self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_play)
+                self.play_stop_button.set_icon_name("media-playback-start-symbolic")
+                self.pause_button.set_sensitive(False)
 
                 # Wenn eine Chromecast-Position vorhanden ist, springe dorthin
                 if chromecast_position and chromecast_position > 0:
@@ -5314,11 +5331,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def on_play(self, button):
         """Startet die Wiedergabe"""
+        print(f"\n!!! on_play() wurde aufgerufen !!! Modus: {self.play_mode}")
         if self.play_mode == "local":
             self.video_player.play()
             self.start_timeline_updates()
-            self.play_button.set_icon_name("media-playback-pause-symbolic")
-            self.reconnect_play_button(self.on_pause)
+            self.play_stop_button.set_icon_name("media-playback-stop-symbolic")
+            self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_stop)
+            self.pause_button.set_sensitive(True)
+            self.pause_button.set_icon_name("media-playback-pause-symbolic")
         else:
             # Chromecast-Modus - Prüfe den Zustand
             mc = self.cast_manager.mc
@@ -5332,15 +5352,16 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.cast_manager.play()
                 self.start_timeline_updates()
                 self.inhibit_suspend()
-                self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.reconnect_play_button(self.on_pause)
+                self.play_stop_button.set_icon_name("media-playback-stop-symbolic")
+                self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_stop)
+                self.pause_button.set_sensitive(True)
             elif self.current_video_path and self.cast_manager.selected_cast:
                 # Verhindere Standby während Streaming
                 # Starte HTTP-Server und streame zu Chromecast
                 self.status_label.set_text("Starte Streaming...")
                 self.loading_spinner.start()
                 self.loading_spinner.set_visible(True)
-                self.play_button.set_sensitive(False)
+                self.play_stop_button.set_sensitive(False)
 
                 def start_streaming():
                     try:
@@ -5378,23 +5399,24 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                             success = self.cast_manager.play_video(video_path, video_url)
 
                             if success:
-                                GLib.idle_add(lambda: (
-                                    self.status_label.set_text("Streaming läuft..."),
-                                    self.start_timeline_updates(),
-                                    self.inhibit_suspend(),
-                                    self.loading_spinner.stop(),
-                                    self.loading_spinner.set_visible(False),
-                                    self.play_button.set_sensitive(True),
-                                    self.reconnect_play_button(self.on_pause),
-                                    self.play_button.set_icon_name("media-playback-pause-symbolic")
-                                ))
+                                def update_ui_after_streaming():
+                                    self.status_label.set_text("Streaming läuft...")
+                                    self.start_timeline_updates()
+                                    self.inhibit_suspend()
+                                    self.loading_spinner.stop()
+                                    self.loading_spinner.set_visible(False)
+                                    self.play_stop_button.set_sensitive(True)
+                                    self.play_stop_button.set_icon_name("media-playback-stop-symbolic")
+                                    self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_stop)
+                                    self.pause_button.set_sensitive(True)
+                                GLib.idle_add(update_ui_after_streaming)
                             else:
                                 GLib.idle_add(lambda: (
                                     self.status_label.set_text("Streaming fehlgeschlagen"),
                                     self.uninhibit_suspend(),
                                     self.loading_spinner.stop(),
                                     self.loading_spinner.set_visible(False),
-                                    self.play_button.set_sensitive(True)
+                                    self.play_stop_button.set_sensitive(True)
                                 ))
                         else:
                             GLib.idle_add(lambda: (
@@ -5402,7 +5424,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                 self.uninhibit_suspend(),
                                 self.loading_spinner.stop(),
                                 self.loading_spinner.set_visible(False),
-                                self.play_button.set_sensitive(True)
+                                self.play_stop_button.set_sensitive(True)
                             ))
                     except Exception as e:
                         print(f"Streaming-Fehler: {e}")
@@ -5413,7 +5435,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                             self.uninhibit_suspend(),
                             self.loading_spinner.stop(),
                             self.loading_spinner.set_visible(False),
-                            self.play_button.set_sensitive(True)
+                            self.play_stop_button.set_sensitive(True)
                         ))
 
                 thread = threading.Thread(target=start_streaming, daemon=True)
@@ -5421,16 +5443,32 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def on_pause(self, button):
         """Pausiert die Wiedergabe"""
+        print(f"\n!!! on_pause() wurde aufgerufen !!! Modus: {self.play_mode}")
+        
+        # Prüfe, ob das Video gerade abgespielt wird. Wenn ja, pausiere es.
+        # Wenn es bereits pausiert ist, setze es fort.
+        is_playing = self.video_player.playbin.get_state(0).state == Gst.State.PLAYING
+
         if self.play_mode == "local":
-            self.video_player.pause()
-            self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.reconnect_play_button(self.on_play)
+            if is_playing:
+                self.video_player.pause()
+                self.pause_button.set_icon_name("media-playback-start-symbolic")
+            else:
+                self.video_player.play()
+                self.pause_button.set_icon_name("media-playback-pause-symbolic")
         else:
+            print(f"\n=== on_pause() aufgerufen im Chromecast-Modus ===")
+            print(f"Chromecast ausgewählt: {self.cast_manager.selected_cast is not None}")
+            print(f"Media Controller: {self.cast_manager.mc is not None}")
+
             self.cast_manager.pause()
+
             # Bei Pause Standby wieder erlauben
             self.uninhibit_suspend()
-            self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.reconnect_play_button(self.on_play)
+            # Der Pause-Button wird zum Resume-Button
+            self.pause_button.set_icon_name("media-playback-start-symbolic")
+            # Der Stop-Button bleibt ein Stop-Button
+            print("=== on_pause() abgeschlossen ===")
 
     def on_stop(self, button):
         """Stoppt die Wiedergabe"""
@@ -5448,8 +5486,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.time_label.set_text("00:00")
         
         # Play-Button zurücksetzen
-        self.play_button.set_icon_name("media-playback-start-symbolic")
-        self.reconnect_play_button(self.on_play)
+        self.play_stop_button.set_icon_name("media-playback-start-symbolic")
+        self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_play)
+        self.pause_button.set_sensitive(False)
 
     def on_volume_changed(self, scale):
         """Wird aufgerufen, wenn der Lautstärke-Slider bewegt wird"""
@@ -5849,8 +5888,9 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
             if autoplay:
                 # Play-Button aktualisieren
-                self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.reconnect_play_button(self.on_pause)
+                self.play_stop_button.set_icon_name("media-playback-stop-symbolic")
+                self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_stop)
+                self.pause_button.set_sensitive(True)
             
             self.status_label.set_text(f"Spielt: {filename}" if autoplay else f"Bereit: {filename}")
 
@@ -5895,35 +5935,36 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                     if video_url:
                         success = self.cast_manager.play_video(video_path, video_url)
                         if success:
-                            GLib.idle_add(lambda: (
-                                self.status_label.set_text(f"Streamt: {filename}"),
-                                self.start_timeline_updates(),
-                                self.inhibit_suspend(),
-                                self.loading_spinner.stop(),
-                                self.loading_spinner.set_visible(False),
-                                self.play_button.set_sensitive(True),
-                                self.reconnect_play_button(self.on_pause),
-                                self.play_button.set_icon_name("media-playback-pause-symbolic")
-                            ))
+                            def update_ui_streaming_started():
+                                self.status_label.set_text(f"Streamt: {filename}")
+                                self.start_timeline_updates()
+                                self.inhibit_suspend()
+                                self.loading_spinner.stop(); self.loading_spinner.set_visible(False)
+                                self.play_stop_button.set_sensitive(True)
+                                self.play_stop_button.set_icon_name("media-playback-stop-symbolic")
+                                self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_stop)
+                                self.pause_button.set_sensitive(True)
+                            GLib.idle_add(update_ui_streaming_started)
                         else:
                             GLib.idle_add(lambda: (
                                 self.status_label.set_text("Streaming fehlgeschlagen"),
                                 self.loading_spinner.stop(),
                                 self.loading_spinner.set_visible(False),
-                                self.play_button.set_sensitive(True)
+                                self.play_stop_button.set_sensitive(True)
                             ))
                     else:
                         GLib.idle_add(lambda: (
                             self.status_label.set_text("HTTP-Server-Fehler"),
                             self.loading_spinner.stop(),
                             self.loading_spinner.set_visible(False),
-                            self.play_button.set_sensitive(True)
+                            self.play_stop_button.set_sensitive(True)
                         ))
 
                 thread = threading.Thread(target=start_streaming, daemon=True)
                 thread.start()
 
     def on_stop(self, button):
+        """Stoppt die Wiedergabe"""
         """Stoppt die Wiedergabe"""
         if self.play_mode == "local":
             self.video_player.stop()
@@ -5939,8 +5980,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.time_label.set_text("00:00")
 
         # Play-Button zurücksetzen
-        self.play_button.set_icon_name("media-playback-start-symbolic")
-        self.reconnect_play_button(self.on_play)
+        self.play_stop_button.set_icon_name("media-playback-start-symbolic")
+        self.play_stop_button_handler_id = self.reconnect_play_stop_button(self.play_stop_button_handler_id, self.on_play)
+        self.pause_button.set_sensitive(False)
+        self.pause_button.set_sensitive(False)
 
 
     
@@ -6138,19 +6181,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
     def toggle_play_pause(self):
         """Wechselt zwischen Wiedergabe und Pause."""
-        # Finde den aktuellen Wiedergabestatus
-        current_state = self.video_player.playbin.get_state(0).state
-        is_playing = (current_state == Gst.State.PLAYING)
-
-        # Führe die entsprechende Aktion aus
-        """Wechselt zwischen Wiedergabe und Pause."""
-        is_playing = False
-        if self.play_mode == "local":
-            state = self.video_player.playbin.get_state(0).state
-            is_playing = (state == Gst.State.PLAYING)
-        elif self.cast_manager.mc and self.cast_manager.mc.status:
-            is_playing = (self.cast_manager.mc.status.player_state == "PLAYING")
-
+        # Die zuverlässigste Methode, den Zustand zu bestimmen, ist zu prüfen,
+        # welcher Handler gerade aktiv ist. Der GStreamer-Status kann asynchron sein.
+        # Wenn der on_pause-Handler verbunden ist, bedeutet das, dass das Video gerade abgespielt wird.
+        is_playing = self.video_player.playbin.get_state(0).state == Gst.State.PLAYING
         if is_playing:
             self.on_pause(None)
         else:
