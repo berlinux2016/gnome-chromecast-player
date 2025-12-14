@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.gnome-chromecast-player</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>GNOME Chromecast Player</name>
+  <summary>Modern video player with Chromecast support</summary>
+
+  <description>
+    <p>
+      A modern GTK4/Libadwaita video player with comprehensive Chromecast streaming support.
+      Features hardware acceleration, YouTube streaming, and advanced playback controls.
+    </p>
+    <p>Key Features:</p>
+    <ul>
+      <li>Chromecast streaming with automatic format conversion</li>
+      <li>Hardware acceleration (VA-API for AMD, NVDEC for NVIDIA)</li>
+      <li>YouTube video streaming via URL</li>
+      <li>Playlist support with thumbnails and auto-advance</li>
+      <li>Recent files history (up to 10 entries)</li>
+      <li>Frame-by-frame navigation for precise video analysis</li>
+      <li>Variable playback speed (0.25x to 3.0x)</li>
+      <li>A-B loop for learning and practice</li>
+      <li>Video effects and equalizer</li>
+      <li>Screenshot capture</li>
+      <li>Subtitle and multi-audio support</li>
+      <li>Timeline thumbnails with live scrubbing</li>
+      <li>Bookmark/Resume functionality</li>
+      <li>Comprehensive keyboard shortcuts (press H for help)</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">gnome-chromecast-player.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main player interface</caption>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/berlinux2016/gnome-chromecast-player</url>
+  <url type="bugtracker">https://github.com/berlinux2016/gnome-chromecast-player/issues</url>
+
+  <provides>
+    <binary>gnome-chromecast-player</binary>
+  </provides>
+
+  <releases>
+    <release version="2.0.0" date="2025-12-14">
+      <description>
+        <p>Major feature release:</p>
+        <ul>
+          <li>Recent Files feature with history of last 10 videos</li>
+          <li>Playback speed shortcuts with [ and ] keys</li>
+          <li>Frame-by-frame navigation with , and . keys</li>
+          <li>Keyboard shortcuts help dialog (press H)</li>
+          <li>Fixed critical Play/Pause button handler bugs</li>
+          <li>Improved Chromecast streaming workflow</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.0" date="2025-12-09">
+      <description>
+        <p>Thumbnail and performance improvements:</p>
+        <ul>
+          <li>Playlist thumbnails with async extraction</li>
+          <li>Intelligent thumbnail caching</li>
+          <li>Performance optimizations</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.0" date="2025-12-07">
+      <description>
+        <p>Initial release with core features</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+
+  <keywords>
+    <keyword>video</keyword>
+    <keyword>player</keyword>
+    <keyword>chromecast</keyword>
+    <keyword>streaming</keyword>
+    <keyword>media</keyword>
+    <keyword>cast</keyword>
+  </keywords>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>Player</category>
+  </categories>
+
+  <developer_name>berlinux2016</developer_name>
+</component>

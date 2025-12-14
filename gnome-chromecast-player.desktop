@@ -1,0 +1,26 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GNOME Chromecast Player
+GenericName=Video Player
+Comment=Modern video player with Chromecast support
+Comment[de]=Moderner Videoplayer mit Chromecast-Unterstützung
+Icon=gnome-chromecast-player
+Exec=gnome-chromecast-player %F
+Terminal=false
+Categories=AudioVideo;Video;Player;GTK;GNOME;
+MimeType=video/mp4;video/x-matroska;video/x-msvideo;video/quicktime;video/webm;video/x-flv;video/mpeg;application/x-mpegURL;
+Keywords=video;player;media;chromecast;stream;cast;
+StartupNotify=true
+StartupWMClass=video-chromecast-player
+Actions=OpenFile;OpenURL;
+
+[Desktop Action OpenFile]
+Name=Open File
+Name[de]=Datei öffnen
+Exec=gnome-chromecast-player
+
+[Desktop Action OpenURL]
+Name=Stream URL
+Name[de]=URL streamen
+Exec=gnome-chromecast-player --url
