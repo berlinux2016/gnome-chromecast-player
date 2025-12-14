@@ -3092,7 +3092,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
     def on_open_recent_file(self, filepath):
         """Öffnet eine Datei aus den Recent Files"""
         if Path(filepath).exists():
-            self.load_video(filepath)
+            self.load_video_with_bookmark_check(filepath)
         else:
             self.status_label.set_text("Datei existiert nicht mehr")
             # Entferne nicht existierende Datei aus Recent Files
@@ -5317,12 +5317,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         if self.play_mode == "local":
             self.video_player.play()
             self.start_timeline_updates()
-            try:
-                self.play_button.disconnect_by_func(self.on_play)
-            except TypeError:
-                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-pause-symbolic")
-            self.play_button.connect("clicked", self.on_pause)
+            self.reconnect_play_button(self.on_pause)
         else:
             # Chromecast-Modus - Prüfe den Zustand
             mc = self.cast_manager.mc
@@ -5336,12 +5332,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.cast_manager.play()
                 self.start_timeline_updates()
                 self.inhibit_suspend()
-                try:
-                    self.play_button.disconnect_by_func(self.on_play)
-                except TypeError:
-                    pass # War nicht verbunden
                 self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.play_button.connect("clicked", self.on_pause)
+                self.reconnect_play_button(self.on_pause)
             elif self.current_video_path and self.cast_manager.selected_cast:
                 # Verhindere Standby während Streaming
                 # Starte HTTP-Server und streame zu Chromecast
@@ -5431,22 +5423,14 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         """Pausiert die Wiedergabe"""
         if self.play_mode == "local":
             self.video_player.pause()
-            try:
-                self.play_button.disconnect_by_func(self.on_pause)
-            except TypeError:
-                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.play_button.connect("clicked", self.on_play)
+            self.reconnect_play_button(self.on_play)
         else:
             self.cast_manager.pause()
             # Bei Pause Standby wieder erlauben
             self.uninhibit_suspend()
-            try:
-                self.play_button.disconnect_by_func(self.on_pause)
-            except TypeError:
-                pass # War nicht verbunden
             self.play_button.set_icon_name("media-playback-start-symbolic")
-            self.play_button.connect("clicked", self.on_play)
+            self.reconnect_play_button(self.on_play)
 
     def on_stop(self, button):
         """Stoppt die Wiedergabe"""
@@ -5465,8 +5449,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         
         # Play-Button zurücksetzen
         self.play_button.set_icon_name("media-playback-start-symbolic")
-        self.play_button.disconnect_by_func(self.on_pause)
-        self.play_button.connect("clicked", self.on_play)
+        self.reconnect_play_button(self.on_play)
 
     def on_volume_changed(self, scale):
         """Wird aufgerufen, wenn der Lautstärke-Slider bewegt wird"""
@@ -5866,12 +5849,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
             if autoplay:
                 # Play-Button aktualisieren
-                try:
-                    self.play_button.disconnect_by_func(self.on_play)
-                except TypeError:
-                    pass # War nicht verbunden
                 self.play_button.set_icon_name("media-playback-pause-symbolic")
-                self.play_button.connect("clicked", self.on_pause)
+                self.reconnect_play_button(self.on_pause)
             
             self.status_label.set_text(f"Spielt: {filename}" if autoplay else f"Bereit: {filename}")
 
@@ -5958,19 +5937,10 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         self.stop_timeline_updates()
         self.timeline_scale.set_value(0)
         self.time_label.set_text("00:00")
-        
+
         # Play-Button zurücksetzen
         self.play_button.set_icon_name("media-playback-start-symbolic")
-        try:
-            self.play_button.disconnect_by_func(self.on_pause)
-        except TypeError:
-            pass # War nicht verbunden
-        try:
-            # Stelle sicher, dass nur ein on_play Handler verbunden ist
-            self.play_button.disconnect_by_func(self.on_play)
-        except TypeError:
-            pass
-        self.play_button.connect("clicked", self.on_play)
+        self.reconnect_play_button(self.on_play)
 
 
     
