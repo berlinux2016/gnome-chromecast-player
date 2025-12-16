@@ -1,0 +1,791 @@
+# German translation for gnome-chromecast-player
+# Copyright (C) 2025
+# This file is distributed under the same license as the gnome-chromecast-player package.
+# DaHool <your-email@example.com>, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-chromecast-player 2.0.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-12-16 17:00+0000\n"
+"PO-Revision-Date: 2025-12-16 17:00+0000\n"
+"Last-Translator: DaHool <your-email@example.com>\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Application
+msgid "Video Chromecast Player"
+msgstr ""
+
+# Buttons - Header Bar
+msgid "Open Video"
+msgstr ""
+
+msgid "Recently opened videos"
+msgstr ""
+
+msgid "Open video from URL (e.g. YouTube)"
+msgstr ""
+
+msgid "About"
+msgstr ""
+
+msgid "Search Chromecast Devices"
+msgstr ""
+
+msgid "Select subtitles"
+msgstr ""
+
+msgid "Select audio track"
+msgstr ""
+
+msgid "Chapters"
+msgstr ""
+
+msgid "Playback speed"
+msgstr ""
+
+msgid "Video equalizer"
+msgstr ""
+
+msgid "Video effects"
+msgstr ""
+
+msgid "Fullscreen (F11)"
+msgstr ""
+
+msgid "Picture-in-Picture (PiP)"
+msgstr ""
+
+# Status messages
+msgid "File no longer exists"
+msgstr ""
+
+msgid "History cleared"
+msgstr ""
+
+msgid "No valid video files found"
+msgstr ""
+
+#, c-format
+msgid "%d video(s) added to playlist"
+msgstr ""
+
+# Playlist section
+msgid "Playlist"
+msgstr ""
+
+msgid "Add videos to playlist"
+msgstr ""
+
+msgid "Import playlist (.m3u, .pls)"
+msgstr ""
+
+msgid "Save playlist"
+msgstr ""
+
+msgid "Shuffle playlist"
+msgstr ""
+
+msgid "Clear playlist"
+msgstr ""
+
+# Chromecast section
+msgid "Chromecast Devices"
+msgstr ""
+
+msgid "No devices found"
+msgstr ""
+
+msgid "Extended Information"
+msgstr ""
+
+msgid "Device: -"
+msgstr ""
+
+#, c-format
+msgid "Device: %s"
+msgstr ""
+
+msgid "Model: -"
+msgstr ""
+
+#, c-format
+msgid "Model: %s"
+msgstr ""
+
+msgid "App: -"
+msgstr ""
+
+#, c-format
+msgid "App: %s"
+msgstr ""
+
+msgid "Status: IDLE"
+msgstr ""
+
+#, c-format
+msgid "Status: %s %s"
+msgstr ""
+
+msgid "Media: -"
+msgstr ""
+
+#, c-format
+msgid "Media: %s"
+msgstr ""
+
+msgid "Buffer: 0%"
+msgstr ""
+
+#, c-format
+msgid "Progress: %d%%"
+msgstr ""
+
+#, c-format
+msgid "Group (%d): %s"
+msgstr ""
+
+# Playback controls
+msgid "Previous video"
+msgstr ""
+
+msgid "Play / Stop"
+msgstr ""
+
+msgid "Pause / Resume"
+msgstr ""
+
+msgid "Next video"
+msgstr ""
+
+# A-B Loop
+msgid "A-B Loop: Set start point (key 'A')"
+msgstr ""
+
+msgid "A-B Loop: Set end point (key 'B')"
+msgstr ""
+
+msgid "Clear A-B Loop (key 'C')"
+msgstr ""
+
+msgid "Export A-B range as video (key 'E')"
+msgstr ""
+
+msgid "Screenshot from current frame (key 'S')"
+msgstr ""
+
+msgid "Jump to time (key 'G')"
+msgstr ""
+
+#, c-format
+msgid "Loop point A set: %s"
+msgstr ""
+
+#, c-format
+msgid "Loop point B set: %s"
+msgstr ""
+
+#, c-format
+msgid "Loop active: %s - %s"
+msgstr ""
+
+msgid "Point B must be after point A!"
+msgstr ""
+
+msgid "A-B Loop cleared"
+msgstr ""
+
+msgid "Please set A and B points first"
+msgstr ""
+
+msgid "No video loaded"
+msgstr ""
+
+msgid "Exporting clip..."
+msgstr ""
+
+#, c-format
+msgid "Clip saved: %s"
+msgstr ""
+
+msgid "Clip export failed"
+msgstr ""
+
+#, c-format
+msgid "Export error: %s"
+msgstr ""
+
+msgid "ffmpeg not found - please install"
+msgstr ""
+
+# Playback mode
+msgid "<b>Playback Mode:</b>"
+msgstr ""
+
+msgid "Switch between local playback and Chromecast"
+msgstr ""
+
+# Video Equalizer
+msgid "Video Equalizer"
+msgstr ""
+
+msgid "Brightness"
+msgstr ""
+
+msgid "Contrast"
+msgstr ""
+
+msgid "Saturation"
+msgstr ""
+
+msgid "Hue"
+msgstr ""
+
+msgid "Reset"
+msgstr ""
+
+# Video Effects
+msgid "Video Effects"
+msgstr ""
+
+msgid "Rotation & Flip"
+msgstr ""
+
+msgid "Normal"
+msgstr ""
+
+msgid "Rotate 90° CW"
+msgstr ""
+
+msgid "Rotate 180°"
+msgstr ""
+
+msgid "Rotate 90° CCW"
+msgstr ""
+
+msgid "Horizontal"
+msgstr ""
+
+msgid "Vertical"
+msgstr ""
+
+msgid "Rotation"
+msgstr ""
+
+msgid "Zoom"
+msgstr ""
+
+msgid "Crop"
+msgstr ""
+
+msgid "Top:"
+msgstr ""
+
+msgid "Bottom:"
+msgstr ""
+
+msgid "Left:"
+msgstr ""
+
+msgid "Right:"
+msgstr ""
+
+msgid "Zoom/Crop"
+msgstr ""
+
+msgid "Gamma Correction"
+msgstr ""
+
+msgid "Filter Presets"
+msgstr ""
+
+msgid "Sepia"
+msgstr ""
+
+msgid "Grayscale"
+msgstr ""
+
+msgid "Black & White"
+msgstr ""
+
+msgid "Vintage"
+msgstr ""
+
+msgid "Vivid"
+msgstr ""
+
+msgid "Dark"
+msgstr ""
+
+msgid "Bright"
+msgstr ""
+
+msgid "Cool"
+msgstr ""
+
+msgid "Warm"
+msgstr ""
+
+msgid "Gamma/Filter"
+msgstr ""
+
+msgid "Reset All Effects"
+msgstr ""
+
+# Go to Time Dialog
+msgid "Enter target time (format: MM:SS or HH:MM:SS)"
+msgstr ""
+
+#, c-format
+msgid "Video duration: %s"
+msgstr ""
+
+#, c-format
+msgid "Jumped to %s"
+msgstr ""
+
+msgid "Invalid time specification"
+msgstr ""
+
+# PiP
+msgid "PiP only available during local playback"
+msgstr ""
+
+msgid "PiP"
+msgstr ""
+
+msgid "Restore fullscreen"
+msgstr ""
+
+# Loop Mode
+msgid "Repeat: Off"
+msgstr ""
+
+msgid "Repeat: All"
+msgstr ""
+
+msgid "Repeat: One"
+msgstr ""
+
+# URL Dialog
+msgid "Enter a URL from YouTube or another supported site."
+msgstr ""
+
+msgid "Invalid URL entered."
+msgstr ""
+
+msgid "Loading video information from URL..."
+msgstr ""
+
+#, c-format
+msgid "Loaded: %s (will auto-convert to MP4)"
+msgstr ""
+
+# Video conversion messages
+msgid "Converting video to MP4..."
+msgstr ""
+
+msgid "Conversion complete!"
+msgstr ""
+
+#, c-format
+msgid "Converting... %s"
+msgstr ""
+
+#, c-format
+msgid "Error: %s"
+msgstr ""
+
+msgid "Hardware encoding not available"
+msgstr ""
+
+#, c-format
+msgid "Re-encoding in progress (%s)..."
+msgstr ""
+
+msgid "Re-encoding complete!"
+msgstr ""
+
+# GPU Detection
+#, c-format
+msgid "✓ NVIDIA GPU: %s (%dMB)"
+msgstr ""
+
+#, c-format
+msgid "✓ AMD GPU: %s"
+msgstr ""
+
+#, c-format
+msgid "✓ Intel GPU: %s"
+msgstr ""
+
+msgid "ℹ No specific GPU detected, using AMD settings"
+msgstr ""
+
+# Chromecast messages
+msgid "ℹ Chromecast search already running."
+msgstr ""
+
+msgid "=== Starting asynchronous Chromecast search ==="
+msgstr ""
+
+msgid "Devices will be shown as they are found..."
+msgstr ""
+
+#, c-format
+msgid "✓ Device found: %s (%s)"
+msgstr ""
+
+#, c-format
+msgid "✗ Device removed: %s"
+msgstr ""
+
+msgid "✗ No devices found after 3 seconds."
+msgstr ""
+
+msgid "  Possible causes:"
+msgstr ""
+
+msgid "  - Chromecast and computer are not on the same network"
+msgstr ""
+
+msgid "  - Firewall blocks mDNS/Cast protocol"
+msgstr ""
+
+msgid "  - Chromecast is not powered on"
+msgstr ""
+
+#, c-format
+msgid "✗ Device '%s' could not be connected."
+msgstr ""
+
+msgid "✗ No Chromecast device selected"
+msgstr ""
+
+msgid "Starting Chromecast playback..."
+msgstr ""
+
+msgid "  Stopping active app for Chromecast streaming..."
+msgstr ""
+
+msgid "ℹ Unknown video format, trying as MP4..."
+msgstr ""
+
+msgid "✓ WebM is supported"
+msgstr ""
+
+msgid "✓ MP4 - fully supported"
+msgstr ""
+
+msgid "  Check firewall settings!"
+msgstr ""
+
+msgid "  Waiting for Chromecast response..."
+msgstr ""
+
+#, c-format
+msgid "  Attempt %d/%d: Status update error: %s"
+msgstr ""
+
+#, c-format
+msgid "  Attempt %d/%d: Status is IDLE, waiting (TV may be waking up)..."
+msgstr ""
+
+msgid "  ... sending another play command as 'push'."
+msgstr ""
+
+msgid "  TV might be off or Chromecast not responding."
+msgstr ""
+
+msgid "Possible causes:"
+msgstr ""
+
+msgid "  1. Firewall blocking ports (run ./fix-firewall.sh)"
+msgstr ""
+
+msgid "  2. Video format not supported (use MP4)"
+msgstr ""
+
+msgid "  3. Network issues between computer and Chromecast"
+msgstr ""
+
+msgid "  4. Video codec not supported"
+msgstr ""
+
+msgid "Open firewall:"
+msgstr ""
+
+msgid "Chromecast: Pause being sent..."
+msgstr ""
+
+msgid "Chromecast: Pause command successfully sent"
+msgstr ""
+
+#, c-format
+msgid "Chromecast pause error: %s"
+msgstr ""
+
+msgid "WARNING: Chromecast Media Controller (self.mc) not initialized!"
+msgstr ""
+
+msgid "Chromecast: Play being sent..."
+msgstr ""
+
+msgid "Chromecast: Play command successfully sent"
+msgstr ""
+
+#, c-format
+msgid "Chromecast play error: %s"
+msgstr ""
+
+#, c-format
+msgid "Chromecast: Seeking to %.1fs"
+msgstr ""
+
+#, c-format
+msgid "✓ Chromecast: Seek successful to %.1fs"
+msgstr ""
+
+#, c-format
+msgid "✗ Chromecast seek error: %s"
+msgstr ""
+
+#, c-format
+msgid "Chromecast volume: %.0f%%"
+msgstr ""
+
+#, c-format
+msgid "✗ Invalid volume value: %.1f (must be between 0.0 and 1.0)"
+msgstr ""
+
+#, c-format
+msgid "✗ Error setting Chromecast volume: %s"
+msgstr ""
+
+#, c-format
+msgid "✗ Error getting Chromecast volume: %s"
+msgstr ""
+
+msgid "✗ No active Chromecast stream"
+msgstr ""
+
+msgid "=== Enabling Chromecast subtitles ==="
+msgstr ""
+
+msgid "✓ Subtitles enabled"
+msgstr ""
+
+#, c-format
+msgid "✗ Error enabling subtitles: %s"
+msgstr ""
+
+msgid "✓ Subtitles disabled"
+msgstr ""
+
+#, c-format
+msgid "✗ Error disabling subtitles: %s"
+msgstr ""
+
+#, c-format
+msgid "Select Chromecast audio track %d"
+msgstr ""
+
+#, c-format
+msgid "✓ Audio track %d selected"
+msgstr ""
+
+#, c-format
+msgid "✗ Error switching audio track: %s"
+msgstr ""
+
+msgid "=== Searching for Chromecast groups ==="
+msgstr ""
+
+msgid "ℹ No Chromecast groups found"
+msgstr ""
+
+msgid "  Audio will be played synchronized on all devices in the group"
+msgstr ""
+
+# Playlist messages
+#, c-format
+msgid "✓ Video added to playlist: %s"
+msgstr ""
+
+#, c-format
+msgid "ℹ Video already in playlist: %s"
+msgstr ""
+
+#, c-format
+msgid "✓ Video removed from playlist: %s"
+msgstr ""
+
+msgid "✓ Playlist cleared"
+msgstr ""
+
+#, c-format
+msgid "✓ Playlist saved: %s"
+msgstr ""
+
+#, c-format
+msgid "✗ Error saving playlist: %s"
+msgstr ""
+
+msgid "✓ Playlist shuffled"
+msgstr ""
+
+#, c-format
+msgid "✓ %d duplicate entries removed"
+msgstr ""
+
+# Subtitle tracks
+#, c-format
+msgid "Track %d"
+msgstr ""
+
+#, c-format
+msgid "Track %d (%s)"
+msgstr ""
+
+msgid "Subtitles disabled"
+msgstr ""
+
+# Audio tracks
+#, c-format
+msgid "Track %d (%s) [%s]"
+msgstr ""
+
+# Local playback
+#, c-format
+msgid "Local volume: %.0f%%"
+msgstr ""
+
+#, c-format
+msgid "Playback speed: %.2fx"
+msgstr ""
+
+#, c-format
+msgid "Error setting playback speed to %.2fx"
+msgstr ""
+
+#, c-format
+msgid "Invalid playback speed: %.2f"
+msgstr ""
+
+msgid "No frame available for screenshot"
+msgstr ""
+
+msgid "No caps available for screenshot"
+msgstr ""
+
+msgid "No buffer for screenshot"
+msgstr ""
+
+msgid "Could not map buffer"
+msgstr ""
+
+#, c-format
+msgid "Screenshot saved: %s"
+msgstr ""
+
+#, c-format
+msgid "Screenshot error: %s"
+msgstr ""
+
+# Video effects
+#, c-format
+msgid "Brightness: %.2f"
+msgstr ""
+
+#, c-format
+msgid "Contrast: %.2f"
+msgstr ""
+
+#, c-format
+msgid "Saturation: %.2f"
+msgstr ""
+
+#, c-format
+msgid "Hue: %.2f"
+msgstr ""
+
+msgid "Equalizer reset"
+msgstr ""
+
+#, c-format
+msgid "Gamma: %.2f"
+msgstr ""
+
+#, c-format
+msgid "Zoom: %.1fx (%dx%d)"
+msgstr ""
+
+#, c-format
+msgid "Zoom: %.1fx (waiting for video dimensions)"
+msgstr ""
+
+#, c-format
+msgid "Crop: L=%d R=%d T=%d B=%d"
+msgstr ""
+
+msgid "Crop: Disabled"
+msgstr ""
+
+msgid "All video effects reset"
+msgstr ""
+
+#, c-format
+msgid "Filter preset applied: %s"
+msgstr ""
+
+#, c-format
+msgid "Unknown preset: %s"
+msgstr ""
+
+#, c-format
+msgid "Frame-step (%s): %.3fs"
+msgstr ""
+
+msgid "forward"
+msgstr ""
+
+msgid "backward"
+msgstr ""
+
+#, c-format
+msgid "Local seeking to %.1fs (precise)"
+msgstr ""
+
+# Hardware acceleration error dialog
+msgid "❌ Hardware acceleration not available!"
+msgstr ""
+
+msgid ""
+"This program requires hardware encoding for MKV/AVI conversion.\n"
+"\n"
+"Make sure that:\n"
+"• Your GPU drivers are installed\n"
+"• FFmpeg with hardware support is installed\n"
+"\n"
+"For AMD: sudo pacman -S mesa-va-drivers ffmpeg\n"
+"For NVIDIA: sudo pacman -S nvidia-utils ffmpeg\n"
+"For Intel: sudo pacman -S intel-media-driver ffmpeg\n"
+"\n"
+"More info: https://trac.ffmpeg.org/wiki/HWAccelIntro"
+msgstr ""
+"Dieses Programm benötigt Hardware-Encoding für MKV/AVI Konvertierung.\n"
+"\n"
+"Stellen Sie sicher, dass:\n"
+"• Ihre GPU-Treiber installiert sind\n"
+"• FFmpeg mit Hardware-Unterstützung installiert ist\n"
+"\n"
+"Für AMD: sudo pacman -S mesa-va-drivers ffmpeg\n"
+"Für NVIDIA: sudo pacman -S nvidia-utils ffmpeg\n"
+"Für Intel: sudo pacman -S intel-media-driver ffmpeg\n"
+"\n"
+"Weitere Infos: https://trac.ffmpeg.org/wiki/HWAccelIntro"

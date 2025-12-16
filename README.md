@@ -2,17 +2,21 @@
 
 # 🎬 Video Chromecast Player
 
+### Modern GTK4 Video Player with Chromecast Streaming and Hardware Acceleration
 ### Moderner GTK4 Videoplayer mit Chromecast-Streaming und Hardware-Beschleunigung
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GTK Version](https://img.shields.io/badge/GTK-4-blue.svg)](https://www.gtk.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux-green.svg)](https://www.linux.org/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
+[![Arch Linux](https://img.shields.io/badge/Arch_Linux-Supported-1793D1?logo=arch-linux)](https://archlinux.org/)
 [![GitHub](https://img.shields.io/badge/GitHub-berlinux2016%2Fgnome--chromecast--player-blue?logo=github)](https://github.com/berlinux2016/gnome-chromecast-player)
 
-*Entwickelt von **DaHool** mit ❤️ für Simone*
+**Cross-Distribution Linux Video Player** | **Multilingual (EN/DE)** | **Hardware Accelerated**
 
-[Features](#-features) • [Installation](#-installation) • [Usage](#-verwendung) • [Hardware Acceleration](#-hardware-beschleunigung) • [Troubleshooting](#-fehlerbehebung)
+*Developed by **DaHool** with ❤️ for Simone*
+
+[Features](#-features) • [Installation](#-installation) • [Arch Linux](#arch-linux-recommended) • [Usage](#-verwendung) • [Hardware Acceleration](#-hardware-beschleunigung) • [Troubleshooting](#-fehlerbehebung)
 
 </div>
 
@@ -90,32 +94,79 @@
 - **Patent-sicher** - Hardware-Encoder unterliegen keinen Patentbeschränkungen
 - **Open Source** - MIT Lizenz
 
-## Systemanforderungen
+## 💻 Supported Linux Distributions
 
-- Fedora Linux 43 (oder ähnliche Distribution)
-- Python 3.9 oder höher
+Video Chromecast Player is designed to work on **all major Linux distributions**:
+
+- ✅ **Arch Linux** - Native support with automated installer and AUR package
+- ✅ **Fedora** - Fully tested and optimized
+- ✅ **Ubuntu / Debian** - Compatible with apt-based systems
+- ✅ **openSUSE** - Works with zypper package manager
+- ✅ **Manjaro / EndeavourOS** - All Arch-based distributions
+- ✅ **Other distributions** - Should work on any modern Linux with GTK4
+
+### 🌍 Multilingual Support
+
+The application supports multiple languages:
+- 🇬🇧 **English** - Full UI translation
+- 🇩🇪 **German (Deutsch)** - Vollständige deutsche Übersetzung
+- Automatically detects your system language
+- Easy to add more languages (see [I18N-GUIDE.md](I18N-GUIDE.md))
+
+## System Requirements
+
+- **Any Linux distribution** with GTK4 support
+- Python 3.9 or higher
 - GTK4
 - Libadwaita
 - GStreamer 1.0
-- **AMD oder NVIDIA Grafikkarte** (für Hardware-Beschleunigung - optional, funktioniert auch ohne)
+- **AMD, NVIDIA, or Intel GPU** (for hardware acceleration - optional but recommended)
 
-## Installation
+## 📦 Installation
 
-### Automatische Installation (Empfohlen)
+### Arch Linux (Recommended)
 
-Das Installations-Skript richtet automatisch alles ein, inklusive RPM Fusion und AMD Hardware-Beschleunigung:
+For Arch Linux users, we provide native support:
 
+#### Option 1: Automated Installation Script
+```bash
+chmod +x install-arch.sh
+./install-arch.sh
+```
+
+The script automatically:
+- Detects your GPU (AMD/NVIDIA/Intel)
+- Installs appropriate hardware acceleration drivers
+- Installs all system and Python dependencies
+- Creates desktop entry and icon
+
+#### Option 2: AUR Package (Coming Soon)
+```bash
+yay -S gnome-chromecast-player
+# or
+paru -S gnome-chromecast-player
+```
+
+📖 **Detailed Guide**: See [INSTALL-ARCH.md](INSTALL-ARCH.md) for complete Arch Linux installation instructions.
+
+### Fedora Linux
+
+#### Automatic Installation
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-Das Skript installiert:
-- RPM Fusion Repositories (falls noch nicht vorhanden)
-- Alle GStreamer-Pakete und Codecs
-- AMD VA-API Treiber und Hardware-Beschleunigung
-- Python-Abhängigkeiten
-- Desktop-Verknüpfung für GNOME
+The script installs:
+- RPM Fusion repositories (if not already installed)
+- All GStreamer packages and codecs
+- Hardware acceleration drivers (AMD VA-API / NVIDIA NVDEC)
+- Python dependencies
+- Desktop shortcut for GNOME
+
+### Other Distributions
+
+For Ubuntu, Debian, openSUSE, or other distributions, adapt the package names accordingly
 
 ### Manuelle Installation
 
@@ -678,21 +729,40 @@ Dieses Skript öffnet automatisch alle notwendigen Ports.
    - Manche Router blockieren Kommunikation zwischen Geräten (AP Isolation)
    - Deaktiviere "Client Isolation" in deinen Router-Einstellungen
 
-## Abhängigkeiten
+## 📦 Dependencies
 
-### System-Pakete
-- `gtk4` - GTK4 Toolkit
-- `libadwaita` - GNOME Libadwaita
-- `gstreamer1-*` - GStreamer Multimedia-Framework
-- `gstreamer1-vaapi` - VA-API Hardware-Beschleunigung
-- `mesa-va-drivers` - AMD VA-API Treiber
-- `python3-gobject` - Python GTK Bindings
-- `ffmpeg` - FFmpeg Codecs (via RPM Fusion)
+### System Packages (Distribution-specific)
 
-### Python-Pakete
-- `PyGObject` - Python GTK/GObject Bindings
-- `pychromecast` - Chromecast-Steuerung
-- `zeroconf` - Netzwerk-Service-Discovery
+**Arch Linux:**
+- `gtk4`, `libadwaita` - UI framework
+- `gstreamer`, `gst-plugins-*` - Multimedia framework
+- `libva-mesa-driver` or `nvidia-utils` - Hardware acceleration
+- `python-gobject` - Python GTK bindings
+- `ffmpeg` - Video codecs
+
+**Fedora:**
+- `gtk4`, `libadwaita` - UI framework
+- `gstreamer1-*` - Multimedia framework
+- `mesa-va-drivers` - AMD hardware acceleration
+- `python3-gobject` - Python GTK bindings
+- `ffmpeg` - Video codecs (via RPM Fusion)
+
+**Ubuntu/Debian:**
+- `libgtk-4-1`, `libadwaita-1-0` - UI framework
+- `gstreamer1.0-*` - Multimedia framework
+- `va-driver-all` - Hardware acceleration
+- `python3-gi` - Python GTK bindings
+- `ffmpeg` - Video codecs
+
+### Python Packages (All distributions)
+- `PyGObject>=3.42.0` - Python GTK/GObject bindings
+- `pychromecast>=13.0.0` - Chromecast control
+- `zeroconf>=0.132.0` - Network service discovery
+
+Install via pip:
+```bash
+pip3 install --user -r requirements.txt
+```
 
 ## Performance-Tipps
 
@@ -722,32 +792,53 @@ Dieses Projekt steht unter der MIT-Lizenz.
 
 Mit Liebe gemacht für Simone ❤️
 
-## Entwicklung
+## 🛠️ Development
 
-### Projektstruktur
+### Project Structure
 
 ```
-Videoplayer/
-├── videoplayer.py      # Hauptanwendung
-├── requirements.txt    # Python-Abhängigkeiten
-├── install.sh         # Installations-Skript
-└── README.md          # Dokumentation
+gnome-chromecast-player/
+├── videoplayer.py              # Main application
+├── i18n.py                     # Translation module
+├── requirements.txt            # Python dependencies
+│
+├── install.sh                  # Fedora installer
+├── install-arch.sh             # Arch Linux installer
+├── PKGBUILD                    # AUR package build script
+│
+├── locale/                     # Translations
+│   ├── de/LC_MESSAGES/         # German translations
+│   └── en/LC_MESSAGES/         # English translations
+│
+├── README.md                   # This file
+├── INSTALL-ARCH.md             # Arch Linux installation guide
+├── I18N-GUIDE.md               # Translation guide
+└── TRANSLATION-INTEGRATION-GUIDE.md  # i18n integration guide
 ```
 
-### 🤝 Beitragen
+### 🌍 Contributing Translations
 
-Beiträge sind willkommen! Hier ist wie du helfen kannst:
+We welcome translations! Currently supported:
+- 🇬🇧 English
+- 🇩🇪 German (Deutsch)
 
-1. **Fork** das Repository
-2. Erstelle einen **Feature Branch** (`git checkout -b feature/AmazingFeature`)
-3. **Commit** deine Änderungen (`git commit -m 'Add some AmazingFeature'`)
-4. **Push** zum Branch (`git push origin feature/AmazingFeature`)
-5. Öffne einen **Pull Request**
+To add a new language, see [I18N-GUIDE.md](I18N-GUIDE.md).
+
+### 🤝 Contributing
+
+Contributions are welcome! Here's how you can help:
+
+1. **Fork** the repository
+2. Create a **Feature Branch** (`git checkout -b feature/AmazingFeature`)
+3. **Commit** your changes (`git commit -m 'Add some AmazingFeature'`)
+4. **Push** to the branch (`git push origin feature/AmazingFeature`)
+5. Open a **Pull Request**
 
 #### Coding Standards
-- Folge PEP 8 für Python-Code
-- Kommentiere komplexe Logik auf Deutsch
-- Teste deine Änderungen gründlich auf AMD und NVIDIA Hardware (falls möglich)
+- Follow PEP 8 for Python code
+- Comment complex logic in English
+- Test your changes thoroughly on AMD and NVIDIA hardware (if possible)
+- Add translations for new UI strings (see [I18N-GUIDE.md](I18N-GUIDE.md))
 
 #### Bug Reports
 Wenn du einen Bug findest:
@@ -856,6 +947,17 @@ Wenn du einen Bug findest:
 - [ ] **Metadaten-Export** - Video-Informationen als CSV/JSON
 
 ## 📊 Version History
+
+### Version 2.0.1 (Dezember 2025)
+- 🌍 **Multilingual Support** - Complete internationalization (i18n) system with gettext
+- 🇬🇧 **English Translation** - Full English UI translation
+- 🇩🇪 **German Translation** - Vollständige deutsche Übersetzung (250+ Strings)
+- 🏛️ **Arch Linux Support** - Native Arch Linux installation script with GPU detection
+- 📦 **AUR Package** - PKGBUILD for Arch User Repository submission
+- 📚 **Multi-Distribution Documentation** - Installation guides for Arch, Fedora, Ubuntu, and more
+- 🔧 **Translation System** - Professional gettext-based i18n module (i18n.py)
+- 🌐 **Auto Language Detection** - Automatic system language detection
+- 📖 **Translation Guides** - Comprehensive documentation for translators and developers
 
 ### Version 2.0.0 (Dezember 2025)
 - ✨ **Recent Files** - Verlauf der zuletzt geöffneten Videos (max. 10 Einträge)

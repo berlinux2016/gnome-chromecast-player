@@ -1,0 +1,35 @@
+pkgbase = gnome-chromecast-player
+	pkgdesc = Modern GTK4 video player with Chromecast streaming and hardware acceleration
+	pkgver = 2.0.1
+	pkgrel = 1
+	url = https://github.com/berlinux2016/gnome-chromecast-player
+	arch = any
+	license = MIT
+	makedepends = git
+	depends = python>=3.9
+	depends = python-gobject
+	depends = gtk4
+	depends = libadwaita
+	depends = gstreamer
+	depends = gst-plugins-base
+	depends = gst-plugins-good
+	depends = gst-plugins-bad
+	depends = gst-plugins-ugly
+	depends = gst-libav
+	depends = ffmpeg
+	depends = python-pip
+	optdepends = libva-mesa-driver: Hardware acceleration for AMD GPUs
+	optdepends = libva-intel-driver: Hardware acceleration for Intel GPUs
+	optdepends = intel-media-driver: Hardware acceleration for newer Intel GPUs
+	optdepends = libva-nvidia-driver: Hardware acceleration for NVIDIA GPUs
+	optdepends = nvidia-utils: NVIDIA GPU support
+	optdepends = gstreamer-vaapi: VA-API support for GStreamer
+	optdepends = yt-dlp: YouTube video support
+	optdepends = x264: H.264 encoding support
+	optdepends = x265: H.265/HEVC encoding support
+	optdepends = libvpx: VP8/VP9 encoding support
+	optdepends = aom: AV1 encoding support
+	source = git+https://github.com/berlinux2016/gnome-chromecast-player.git#tag=v2.0.1
+	sha256sums = SKIP
+
+pkgname = gnome-chromecast-player

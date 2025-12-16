@@ -6518,7 +6518,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
             application_name="Video Chromecast Player",
             application_icon="com.videocast.player",
             developer_name="DaHool",
-            version="2.0.0",
+            version="2.0.1",
             developers=["DaHool"],
             copyright="© 2025 DaHool",
             license_type=Gtk.License.MIT_X11,
@@ -6529,7 +6529,19 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
         # Füge Version-Informationen als Credit-Sections hinzu
         about.add_credit_section(
-            "Was ist neu in Version 2.0.0?",
+            "Was ist neu in Version 2.0.1?",
+            [
+                "Multilingual Support - Vollständige Internationalisierung (i18n)",
+                "English Translation - Komplette englische Übersetzung",
+                "German Translation - 250+ übersetzte Strings",
+                "Arch Linux Support - Native Installation mit GPU-Erkennung",
+                "AUR Package - PKGBUILD für Arch User Repository",
+                "Multi-Distribution - Unterstützung für alle Linux-Distributionen"
+            ]
+        )
+
+        about.add_credit_section(
+            "Features in Version 2.0.0",
             [
                 "Recent Files - Zuletzt geöffnete Videos (Verlauf)",
                 "Playback Speed Shortcuts - [ / ] für Geschwindigkeitsänderung",
