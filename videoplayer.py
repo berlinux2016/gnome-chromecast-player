@@ -1823,7 +1823,7 @@ class VideoPlayer(Gtk.Box):
             print(f"Lade Video-Stream: {uri}")
         else:
             abs_path = str(Path(filepath).resolve())
-            uri = f"file:///{abs_path}" if abs_path.startswith('/') else f"file://{abs_path}"
+            uri = f"file://{abs_path}"
             self.current_uri = uri
             print(f"Lade Video lokal: {abs_path}")
 
