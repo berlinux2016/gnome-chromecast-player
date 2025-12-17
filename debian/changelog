@@ -1,0 +1,31 @@
+gnome-chromecast-player (2.0.1) unstable; urgency=medium
+
+  * Add internationalization support (i18n) with English and German translations
+  * Improve README documentation with installation instructions
+  * Bug fixes and stability improvements
+
+ -- DaHool <torsten.mobi@gmail.com>  Tue, 16 Dec 2025 16:51:14 +0100
+
+gnome-chromecast-player (2.0.0) unstable; urgency=medium
+
+  * Major version 2.0 release
+  * Modern GTK4/Libadwaita interface
+  * Hardware acceleration support (AMD, NVIDIA, Intel)
+  * Chromecast streaming with device discovery
+  * YouTube video playback via URL
+  * Playlist management with thumbnails
+  * Subtitle support (SRT, ASS, VTT)
+  * Multiple audio track selection
+  * Video effects and filters (rotation, zoom, crop, gamma, filters)
+  * A-B loop functionality for learning
+  * Chapter navigation support
+  * Frame-by-frame navigation
+  * Playback speed control (0.25x to 3.0x)
+  * Screenshot capture
+  * Video equalizer (brightness, contrast, saturation, hue)
+  * Timeline thumbnails
+  * Keyboard shortcuts with help dialog
+  * Playlist import (M3U, PLS)
+  * Multi-room audio with Chromecast groups
+
+ -- DaHool <torsten.mobi@gmail.com>  Sun, 15 Dec 2025 12:00:00 +0100

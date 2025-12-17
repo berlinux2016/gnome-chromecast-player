@@ -1,0 +1,46 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=gnome-chromecast-player
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_install:
+	dh_auto_install
+	# Install the main application files
+	install -D -m 755 videoplayer.py debian/gnome-chromecast-player/usr/bin/gnome-chromecast-player
+	install -D -m 644 i18n.py debian/gnome-chromecast-player/usr/share/gnome-chromecast-player/i18n.py
+
+	# Install locale files
+	mkdir -p debian/gnome-chromecast-player/usr/share/locale/de/LC_MESSAGES
+	mkdir -p debian/gnome-chromecast-player/usr/share/locale/en/LC_MESSAGES
+	install -D -m 644 locale/de/LC_MESSAGES/gnome-chromecast-player.po debian/gnome-chromecast-player/usr/share/locale/de/LC_MESSAGES/gnome-chromecast-player.po
+	install -D -m 644 locale/en/LC_MESSAGES/gnome-chromecast-player.po debian/gnome-chromecast-player/usr/share/locale/en/LC_MESSAGES/gnome-chromecast-player.po
+
+	# Compile .po files to .mo files
+	msgfmt locale/de/LC_MESSAGES/gnome-chromecast-player.po -o debian/gnome-chromecast-player/usr/share/locale/de/LC_MESSAGES/gnome-chromecast-player.mo
+	msgfmt locale/en/LC_MESSAGES/gnome-chromecast-player.po -o debian/gnome-chromecast-player/usr/share/locale/en/LC_MESSAGES/gnome-chromecast-player.mo
+
+	# Install icon if it exists (with both names for compatibility)
+	if [ -f icon.svg ]; then \
+		install -D -m 644 icon.svg debian/gnome-chromecast-player/usr/share/icons/hicolor/scalable/apps/gnome-chromecast-player.svg; \
+		install -D -m 644 icon.svg debian/gnome-chromecast-player/usr/share/icons/hicolor/scalable/apps/com.videocast.player.svg; \
+	elif [ -f gnome-chromecast-player.svg ]; then \
+		install -D -m 644 gnome-chromecast-player.svg debian/gnome-chromecast-player/usr/share/icons/hicolor/scalable/apps/gnome-chromecast-player.svg; \
+		install -D -m 644 gnome-chromecast-player.svg debian/gnome-chromecast-player/usr/share/icons/hicolor/scalable/apps/com.videocast.player.svg; \
+	elif [ -f icon.png ]; then \
+		install -D -m 644 icon.png debian/gnome-chromecast-player/usr/share/pixmaps/gnome-chromecast-player.png; \
+		install -D -m 644 icon.png debian/gnome-chromecast-player/usr/share/pixmaps/com.videocast.player.png; \
+	fi
+
+	# Install desktop file if it exists
+	if [ -f gnome-chromecast-player.desktop ]; then \
+		install -D -m 644 gnome-chromecast-player.desktop debian/gnome-chromecast-player/usr/share/applications/gnome-chromecast-player.desktop; \
+	fi
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -f *.pyc
+	rm -rf __pycache__
+	rm -rf .pytest_cache
+	rm -rf *.egg-info

@@ -1,0 +1,4 @@
+videoplayer.py usr/bin/gnome-chromecast-player
+i18n.py usr/share/gnome-chromecast-player/
+locale/de/LC_MESSAGES/*.po usr/share/locale/de/LC_MESSAGES/
+locale/en/LC_MESSAGES/*.po usr/share/locale/en/LC_MESSAGES/

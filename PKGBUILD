@@ -1,4 +1,4 @@
-# Maintainer: DaHool <your-email@example.com>
+# Maintainer: DaHool <torsten.mobi@gmail.com>
 pkgname=gnome-chromecast-player
 pkgver=2.0.1
 pkgrel=1
@@ -9,6 +9,9 @@ license=('MIT')
 depends=(
     'python>=3.9'
     'python-gobject'
+    'python-pychromecast'
+    'python-zeroconf'
+    'python-requests'
     'gtk4'
     'libadwaita'
     'gstreamer'
@@ -18,7 +21,7 @@ depends=(
     'gst-plugins-ugly'
     'gst-libav'
     'ffmpeg'
-    'python-pip'
+    'gettext'
 )
 makedepends=('git')
 optdepends=(
@@ -34,23 +37,25 @@ optdepends=(
     'libvpx: VP8/VP9 encoding support'
     'aom: AV1 encoding support'
 )
-source=("git+https://github.com/berlinux2016/gnome-chromecast-player.git#tag=v${pkgver}")
+source=("${pkgname}::git+file://$(pwd)")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$pkgname"
-    git describe --tags --long | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
-}
-
-prepare() {
-    cd "$pkgname"
-    # Install Python dependencies to a temporary location
-    pip install --target="${srcdir}/python-deps" -r requirements.txt --no-deps
+    cd "$srcdir/$pkgname"
+    # Get version from git tag and format it properly for pacman
+    # Converts v2.0.1-0-g1384d17 to 2.0.1.r0.g1384d17
+    git describe --tags --long 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' || echo "2.0.1"
 }
 
 build() {
     cd "$pkgname"
-    # Nothing to build for Python application
+    # Compile locale files
+    for lang in locale/*/LC_MESSAGES/*.po; do
+        if [ -f "$lang" ]; then
+            lang_code=$(echo "$lang" | cut -d'/' -f2)
+            msgfmt "$lang" -o "locale/${lang_code}/LC_MESSAGES/gnome-chromecast-player.mo"
+        fi
+    done
 }
 
 package() {
@@ -59,17 +64,24 @@ package() {
     # Install main application
     install -Dm755 videoplayer.py "${pkgdir}/usr/bin/${pkgname}"
 
-    # Install Python dependencies
-    if [ -d "${srcdir}/python-deps" ]; then
-        mkdir -p "${pkgdir}/usr/lib/python$(python --version | cut -d' ' -f2 | cut -d'.' -f1,2)/site-packages"
-        cp -r "${srcdir}/python-deps/"* "${pkgdir}/usr/lib/python$(python --version | cut -d' ' -f2 | cut -d'.' -f1,2)/site-packages/"
-    fi
+    # Install i18n module
+    install -Dm644 i18n.py "${pkgdir}/usr/share/${pkgname}/i18n.py"
 
-    # Install icon
+    # Install compiled locale files
+    for lang in locale/*/LC_MESSAGES/*.mo; do
+        if [ -f "$lang" ]; then
+            lang_code=$(echo "$lang" | cut -d'/' -f2)
+            install -Dm644 "$lang" "${pkgdir}/usr/share/locale/${lang_code}/LC_MESSAGES/${pkgname}.mo"
+        fi
+    done
+
+    # Install icon (with both names for compatibility)
     if [ -f icon.svg ]; then
         install -Dm644 icon.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg"
+        install -Dm644 icon.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/com.videocast.player.svg"
     elif [ -f gnome-chromecast-player.svg ]; then
         install -Dm644 gnome-chromecast-player.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg"
+        install -Dm644 gnome-chromecast-player.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/com.videocast.player.svg"
     fi
 
     # Install desktop file

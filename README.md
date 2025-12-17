@@ -163,9 +163,76 @@ The script installs:
 - Python dependencies
 - Desktop shortcut for GNOME
 
+### Debian / Ubuntu Linux
+
+#### Building from Source with Debian Package
+
+The recommended way to install on Debian/Ubuntu is to build a .deb package:
+
+```bash
+# Install build dependencies
+sudo apt install debhelper devscripts debhelper dh-python gettext
+
+# Build the package
+chmod +x build-deb.sh
+./build-deb.sh
+
+# Install the package
+sudo dpkg -i ../gnome-chromecast-player_*.deb
+sudo apt-get install -f  # Install missing dependencies if needed
+```
+
+The package will automatically:
+- Install all required dependencies
+- Set up the application in /usr/bin
+- Create desktop entry and menu integration
+- Install translations (English/German)
+- Configure hardware acceleration support
+
+#### Manual Installation (Debian/Ubuntu)
+
+If you prefer manual installation:
+
+```bash
+# Install system dependencies
+sudo apt install -y \
+    python3 \
+    python3-pip \
+    python3-gi \
+    gir1.2-gtk-4.0 \
+    gir1.2-adw-1 \
+    gir1.2-gstreamer-1.0 \
+    gir1.2-gst-plugins-base-1.0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-vaapi \
+    gstreamer1.0-gtk4 \
+    ffmpeg \
+    yt-dlp
+
+# Install hardware acceleration (choose based on your GPU)
+# For AMD:
+sudo apt install -y mesa-va-drivers
+
+# For NVIDIA:
+sudo apt install -y nvidia-driver nvidia-vdpau-driver
+
+# For Intel:
+sudo apt install -y intel-media-va-driver
+
+# Install Python dependencies
+pip3 install --user -r requirements.txt
+
+# Make executable
+chmod +x videoplayer.py
+```
+
 ### Other Distributions
 
-For Ubuntu, Debian, openSUSE, or other distributions, adapt the package names accordingly
+For openSUSE or other distributions, adapt the package names accordingly
 
 ### Manual Installation
 

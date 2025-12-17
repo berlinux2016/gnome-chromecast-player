@@ -1,0 +1,56 @@
+Source: gnome-chromecast-player
+Section: video
+Priority: optional
+Maintainer: DaHool <torsten.mobi@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               python3-all (>= 3.9),
+               dh-python,
+               python3-setuptools
+Standards-Version: 4.6.0
+Homepage: https://github.com/berlinux2016/gnome-chromecast-player
+Vcs-Browser: https://github.com/berlinux2016/gnome-chromecast-player
+Vcs-Git: https://github.com/berlinux2016/gnome-chromecast-player.git
+Rules-Requires-Root: no
+
+Package: gnome-chromecast-player
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-gi (>= 3.42),
+         gir1.2-gtk-4.0,
+         gir1.2-adw-1,
+         gir1.2-gstreamer-1.0,
+         gir1.2-gst-plugins-base-1.0,
+         gstreamer1.0-plugins-base,
+         gstreamer1.0-plugins-good,
+         gstreamer1.0-plugins-bad,
+         gstreamer1.0-plugins-ugly,
+         gstreamer1.0-libav,
+         gstreamer1.0-vaapi,
+         gstreamer1.0-gtk4,
+         python3-pychromecast (>= 13.0.0),
+         python3-zeroconf,
+         python3-requests,
+         python3-yt-dlp,
+         ffmpeg,
+         yt-dlp
+Recommends: mesa-va-drivers | nvidia-driver | intel-media-va-driver
+Description: Modern GTK4 Video Player with Chromecast Streaming
+ Video Chromecast Player is a feature-rich video player with Chromecast
+ support, built with GTK4 and GStreamer.
+ .
+ Features:
+  * Modern GTK4/Libadwaita interface
+  * Hardware-accelerated video playback (AMD/NVIDIA/Intel)
+  * Chromecast streaming support
+  * YouTube video playback via URL
+  * Playlist management with thumbnails
+  * Subtitle support (SRT, ASS, VTT)
+  * Multiple audio track selection
+  * Video effects and filters
+  * A-B loop functionality
+  * Chapter navigation
+  * Multilingual support (English/German)
+ .
+ The player supports all common video formats (MP4, MKV, AVI, WebM, MOV, etc.)
+ and includes automatic format conversion for Chromecast compatibility.
