@@ -1,7 +1,7 @@
 Source: gnome-chromecast-player
 Section: video
 Priority: optional
-Maintainer: DaHool <torsten.mobi@gmail.com>
+Maintainer: DaHool <089mobil@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                python3-all (>= 3.9),
                dh-python,

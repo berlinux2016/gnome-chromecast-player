@@ -1,4 +1,4 @@
-# Maintainer: DaHool <torsten.mobi@gmail.com>
+# Maintainer: DaHool <089mobil@gmail.com>
 pkgname=gnome-chromecast-player
 pkgver=2.0.1
 pkgrel=1

@@ -312,4 +312,4 @@ Before each release:
 
 For translation questions or help:
 - Open an issue: https://github.com/berlinux2016/gnome-chromecast-player/issues
-- Email: [your-email@example.com]
+- Email: 089mobil@gmail.com

@@ -1,7 +1,7 @@
 # German translation for gnome-chromecast-player
 # Copyright (C) 2025
 # This file is distributed under the same license as the gnome-chromecast-player package.
-# DaHool <your-email@example.com>, 2025.
+# DaHool <089mobil@gmail.com>, 2025.
 #
 msgid ""
 msgstr ""
@@ -9,7 +9,7 @@ msgstr ""
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2025-12-16 17:00+0000\n"
 "PO-Revision-Date: 2025-12-16 17:00+0000\n"
-"Last-Translator: DaHool <your-email@example.com>\n"
+"Last-Translator: DaHool <089mobil@gmail.com>\n"
 "Language-Team: German\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
