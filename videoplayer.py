@@ -5123,8 +5123,8 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                                 self.status_label.set_text(f"Streamt: {filename}"),
                                 self.start_timeline_updates(),
                                 self.inhibit_suspend(),
-                                self.play_button.set_sensitive(True),
-                                self.play_button.set_icon_name("media-playback-pause-symbolic"),
+                                self.play_stop_button.set_sensitive(True),
+                                self.play_stop_button.set_icon_name("media-playback-pause-symbolic"),
                                 False
                             ))
                         else:
@@ -5923,7 +5923,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
                 self.status_label.set_text(f"Streame: {filename}")
                 self.loading_spinner.start()
                 self.loading_spinner.set_visible(True)
-                self.play_button.set_sensitive(False)
+                self.play_stop_button.set_sensitive(False)
                 
                 # Starte Streaming in Thread
                 def start_streaming():
@@ -6496,7 +6496,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         state = self.video_player.playbin.get_state(0)
         if state[1] == Gst.State.PLAYING:
             self.video_player.pause()
-            self.play_button.set_icon_name("media-playback-start-symbolic")
+            self.play_stop_button.set_icon_name("media-playback-start-symbolic")
 
         self.video_player.step_frame(forward=True)
         self.status_label.set_text("Frame vorwärts")
@@ -6511,7 +6511,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         state = self.video_player.playbin.get_state(0)
         if state[1] == Gst.State.PLAYING:
             self.video_player.pause()
-            self.play_button.set_icon_name("media-playback-start-symbolic")
+            self.play_stop_button.set_icon_name("media-playback-start-symbolic")
 
         self.video_player.step_frame(forward=False)
         self.status_label.set_text("Frame rückwärts")
