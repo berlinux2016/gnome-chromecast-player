@@ -12,7 +12,7 @@ Categories=AudioVideo;Video;Player;GTK;GNOME;
 MimeType=video/mp4;video/x-matroska;video/x-msvideo;video/quicktime;video/webm;video/x-flv;video/mpeg;application/x-mpegURL;
 Keywords=video;player;media;chromecast;stream;cast;
 StartupNotify=true
-StartupWMClass=video-chromecast-player
+StartupWMClass=org.gnome.ChromecastPlayer
 Actions=OpenFile;OpenURL;
 
 [Desktop Action OpenFile]

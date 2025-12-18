@@ -104,6 +104,8 @@ fi
 - Fixed pychromecast installation via pip in post-install script
 - Fixed GTK4 crash on NVIDIA by forcing OpenGL renderer (GSK_RENDERER=gl)
 - Fixed RPM build script directory handling
+- Fixed application ID to org.gnome.ChromecastPlayer for proper GNOME integration
+- Fixed desktop icon name to gnome-chromecast-player
 
 * Sun Dec 14 2025 berlinux2016 <berlinux2016@github.com> - 2.0.0-1
 - Version 2.0.0 release

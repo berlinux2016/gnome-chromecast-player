@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.gnome-chromecast-player</id>
+  <id>org.gnome.ChromecastPlayer</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>GNOME Chromecast Player</name>
@@ -46,6 +46,17 @@
   </provides>
 
   <releases>
+    <release version="2.0.1" date="2025-12-18">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Added Vulkan Video decoder support for NVIDIA GPUs</li>
+          <li>Fixed GTK4 crash on NVIDIA by forcing OpenGL renderer</li>
+          <li>Fixed pychromecast installation via pip in RPM package</li>
+          <li>Improved application ID consistency (org.gnome.ChromecastPlayer)</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.0.0" date="2025-12-14">
       <description>
         <p>Major feature release:</p>

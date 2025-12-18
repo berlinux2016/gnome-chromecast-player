@@ -6521,7 +6521,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
         about = Adw.AboutWindow(
             transient_for=self,
             application_name="Video Chromecast Player",
-            application_icon="com.videocast.player",
+            application_icon="gnome-chromecast-player",
             developer_name="DaHool",
             version="2.0.1",
             developers=["DaHool"],
@@ -6710,7 +6710,7 @@ class VideoPlayerApp(Adw.Application):
     """Hauptanwendung"""
 
     def __init__(self):
-        super().__init__(application_id='com.videocast.player')
+        super().__init__(application_id='org.gnome.ChromecastPlayer')
         self.connect('activate', self.on_activate)
 
         # Aktionen für das Menü (z.B. Untertitel, Audio und Geschwindigkeit)
