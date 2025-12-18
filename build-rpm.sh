@@ -9,7 +9,7 @@ set -e  # Exit on error
 # Configuration
 APP_NAME="gnome-chromecast-player"
 VERSION="2.0.0"
-RELEASE="1"
+RELEASE="2"
 
 # Colors for output
 RED='\033[0;31m'
@@ -88,6 +88,7 @@ create_tarball() {
 
     local TARBALL_NAME="${APP_NAME}-${VERSION}"
     local TEMP_DIR="/tmp/${TARBALL_NAME}"
+    local ORIGINAL_DIR="$(pwd)"
 
     # Clean up old temp directory
     rm -rf "$TEMP_DIR"
@@ -125,6 +126,9 @@ EOF
 
     # Cleanup
     rm -rf "$TEMP_DIR"
+
+    # Return to original directory
+    cd "$ORIGINAL_DIR"
 
     print_success "Source tarball created: ~/rpmbuild/SOURCES/${TARBALL_NAME}.tar.gz"
 }

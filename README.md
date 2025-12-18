@@ -150,7 +150,32 @@ paru -S gnome-chromecast-player
 
 ### Fedora Linux
 
-#### Automatic Installation
+#### Option 1: RPM Package Installation (Recommended)
+
+Build and install the RPM package:
+
+```bash
+# Build the RPM package
+chmod +x build-rpm.sh
+./build-rpm.sh
+
+# Install the package
+sudo dnf install ./gnome-chromecast-player-*.rpm
+```
+
+**Important**: The package will automatically attempt to install `pychromecast` via pip during installation. If this fails, install it manually:
+
+```bash
+pip3 install --user pychromecast
+```
+
+The RPM package provides:
+- Automatic dependency resolution for system packages
+- Desktop integration (application menu entry, icon)
+- Proper file placement in system directories
+- Clean uninstallation via `sudo dnf remove gnome-chromecast-player`
+
+#### Option 2: Automatic Installation Script
 ```bash
 chmod +x install.sh
 ./install.sh

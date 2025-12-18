@@ -1740,20 +1740,25 @@ class VideoPlayer(Gtk.Box):
 
 
     def setup_hardware_acceleration(self):
-        """Konfiguriert Hardware-Beschleunigung (AMD VA-API / NVIDIA NVDEC)"""
+        """Konfiguriert Hardware-Beschleunigung (AMD VA-API / NVIDIA NVDEC/Vulkan)"""
         try:
             hw_decoder = None
 
             if GPU_TYPE == 'nvidia':
-                # NVIDIA NVDEC Hardware-Beschleunigung
+                # NVIDIA Hardware-Beschleunigung (NVDEC oder Vulkan)
                 nvdec = Gst.ElementFactory.find("nvdec")
                 nvh264dec = Gst.ElementFactory.find("nvh264dec")
+                vulkanh264dec = Gst.ElementFactory.find("vulkanh264dec")
+                vulkanh265dec = Gst.ElementFactory.find("vulkanh265dec")
 
                 if nvdec or nvh264dec:
                     hw_decoder = 'nvdec'
                     print("✓ Hardware-Beschleunigung (NVIDIA NVDEC) aktiviert")
+                elif vulkanh264dec or vulkanh265dec:
+                    hw_decoder = 'vulkan'
+                    print("✓ Hardware-Beschleunigung (NVIDIA Vulkan Video) aktiviert")
                 else:
-                    print("⚠ NVDEC nicht verfügbar, prüfe ob gstreamer1-plugins-bad installiert ist")
+                    print("⚠ NVDEC/Vulkan nicht verfügbar, prüfe ob gstreamer1-plugins-bad-freeworld installiert ist")
 
             elif GPU_TYPE == 'amd':
                 # AMD VA-API Hardware-Beschleunigung
