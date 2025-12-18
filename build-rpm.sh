@@ -8,8 +8,8 @@ set -e  # Exit on error
 
 # Configuration
 APP_NAME="gnome-chromecast-player"
-VERSION="2.0.0"
-RELEASE="2"
+VERSION="2.0.1"
+RELEASE="1"
 
 # Colors for output
 RED='\033[0;31m'

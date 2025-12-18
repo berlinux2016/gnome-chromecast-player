@@ -1,6 +1,6 @@
 Name:           gnome-chromecast-player
-Version:        2.0.0
-Release:        2%{?dist}
+Version:        2.0.1
+Release:        1%{?dist}
 Summary:        Modern GTK4 video player with Chromecast support
 
 License:        MIT
@@ -98,11 +98,12 @@ fi
 %{_datadir}/metainfo/%{name}.appdata.xml
 
 %changelog
-* Thu Dec 18 2025 berlinux2016 <berlinux2016@github.com> - 2.0.0-2
-- Added Vulkan Video decoder support for NVIDIA GPUs
-- Added gstreamer1-plugins-bad-freeworld dependency
+* Thu Dec 18 2025 berlinux2016 <berlinux2016@github.com> - 2.0.1-1
+- Added Vulkan Video decoder support for NVIDIA GPUs (vulkanh264dec, vulkanh265dec)
+- Added gstreamer1-plugins-bad-freeworld dependency for Vulkan video support
 - Fixed pychromecast installation via pip in post-install script
 - Fixed GTK4 crash on NVIDIA by forcing OpenGL renderer (GSK_RENDERER=gl)
+- Fixed RPM build script directory handling
 
 * Sun Dec 14 2025 berlinux2016 <berlinux2016@github.com> - 2.0.0-1
 - Version 2.0.0 release
