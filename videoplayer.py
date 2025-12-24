@@ -416,7 +416,11 @@ class VideoConverter:
             cmd = [
                 'ffmpeg',
                 '-i', str(input_file),
-                '-c', 'copy',  # Kopiere Streams ohne Re-Encoding
+                '-c:v', 'copy',  # Kopiere Video ohne Re-Encoding
+                '-c:a', 'aac',   # Konvertiere Audio zu AAC (Chromecast benötigt AAC)
+                '-b:a', '192k',  # Audio-Bitrate
+                '-ar', '48000',  # Sample-Rate
+                '-ac', '2',      # Stereo
                 '-movflags', '+faststart',  # Optimiere für Streaming
                 '-progress', 'pipe:1',  # Fortschritt ausgeben
                 '-y',  # Überschreibe falls vorhanden
@@ -787,6 +791,7 @@ class ChromecastManager:
     def __init__(self):
         self.chromecasts = []
         self.selected_cast = None
+        self.selected_device_name = None  # Name des ausgewählten Geräts
         self.mc = None
         self._discovery_browser = None
         self._listener = None
@@ -864,6 +869,9 @@ class ChromecastManager:
             print("Warte auf Verbindung...")
             self.selected_cast.wait()  # Warte, bis die Verbindung aktiv ist
 
+            # Speichere den Namen des ausgewählten Geräts
+            self.selected_device_name = service.friendly_name
+
             print(f"✓ Erfolgreich verbunden mit '{service.friendly_name}'")
             print(f"  Status: {self.selected_cast.status}")
             print(f"  App: {self.selected_cast.app_display_name}")
@@ -883,6 +891,14 @@ class ChromecastManager:
 
         try:
             print(f"\n=== Starte Streaming ===")
+            actual_device_name = self.selected_cast.name
+            print(f"Ausgewähltes Gerät: {actual_device_name} (Modell: {self.selected_cast.model_name})")
+
+            # Warnung, wenn ein anderes Gerät verwendet wird als ausgewählt
+            if self.selected_device_name and actual_device_name != self.selected_device_name:
+                print(f"⚠ WARNUNG: Verbunden mit '{actual_device_name}', aber '{self.selected_device_name}' wurde ausgewählt!")
+                print(f"  Dies deutet auf einen Bug hin - bitte melden!")
+
             print(f"Video: {Path(video_path).name}")
             print(f"URL: {video_url}")
 
@@ -5111,7 +5127,7 @@ class VideoPlayerWindow(Adw.ApplicationWindow):
 
                     video_url = self.http_server.get_video_url(video_path)
                     if video_url:
-                        success = self.cast_manager.play_video(self.current_video_path, video_url)
+                        success = self.cast_manager.play_video(video_path, video_url)
                         if success:
                             # Springe zur gespeicherten Position falls vorhanden
                             if current_position and current_position > 0:
